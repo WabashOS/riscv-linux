@@ -44,6 +44,11 @@ branches tracking
 
         $ make ARCH=riscv menuconfig
 
+1. PFA-specific config
+        * sysfs in filesystems->pseudo filesystems
+        * "Initial RAM Filesystem" in general->
+        * frontswap in kernel->
+
 1. Build the uncompressed kernel image:
 
         $ make -j4 ARCH=riscv vmlinux
