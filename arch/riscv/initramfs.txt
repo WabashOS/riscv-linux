@@ -1,9 +1,16 @@
-dir /bin 755 0 0
-file /bin/busybox tmp/bin/busybox 755 0 0
-dir /etc 755 0 0
-file /etc/inittab tmp/etc/inittab 755 0 0
-
 dir /dev 755 0 0
 nod /dev/console 644 0 0 c 5 1
 nod /dev/null 644 0 0 c 1 3
+dir /proc 755 0 0
+dir /sys 755 0 0
 slink /init /bin/busybox 755 0 0
+dir /bin 755 0 0
+file /bin/busybox /data/repos/busybox-1.23.1/busybox 755 0 0
+dir /sbin 755 0 0
+dir /usr 755 0 0
+dir /usr/bin 755 0 0
+dir /usr/sbin 755 0 0
+dir /etc 755 0 0
+file /etc/inittab inittab 644 0 0
+dir /lib 755 0 0
+file /usr/bin/hello /home/xarc/scratch/hello 755 0 0 
