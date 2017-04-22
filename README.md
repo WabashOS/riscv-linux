@@ -62,9 +62,9 @@ Overlay the `riscv` architecture-specific subtree onto an upstream release:
         $ curl -L https://cdn.kernel.org/pub/linux/kernel/v4.x/linux-4.6.2.tar.xz | tar -xJ
         $ cd linux-4.6.2
         $ git init
-        $ git remote add -t master origin https://github.com/riscv/riscv-linux.git
+        $ git remote add -t pfa origin git@github.com:WabashOS/riscv-linux.git
         $ git fetch
-        $ git checkout -f -t origin/master
+        $ git checkout -f -t origin/pfa
 
 Note that the `-t <branch>` option minimizes the history fetched.
 To add another branch:
