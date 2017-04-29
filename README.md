@@ -97,10 +97,10 @@ Note that the comitted arch/riscv/initramfs.txt is tuned for my system, be sure 
         $ make ARCH=riscv vmlinux
 
 # BBL
-The berkeley boot loader ties everything together and creates a bootable image that qemu can run. Configure and build it thusly:
+The berkeley boot loader ties everything together and creates a bootable image that qemu can run. Configure and build it thusly (The riscv-pk 'build' directory might need to be created first):
 
-        $ cd $TOP/riscv-tools/riscv-pk
-        $ ./configure --prefix=RISCV --with-payload=$TOP/linux-4.6.2/vmlinux --host=riscv64-unknown-linux-gnu
+        $ cd $TOP/riscv-tools/riscv-pk/build/
+        $ ../configure --prefix=$RISCV --with-payload=$TOP/linux-4.6.2/vmlinux --host=riscv64-unknown-linux-gnu
         $ cd build/
         $ make bbl
 
