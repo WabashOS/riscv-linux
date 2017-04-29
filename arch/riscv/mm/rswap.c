@@ -44,6 +44,8 @@ static int rswap_frontswap_store(unsigned type, pgoff_t offset,
   void *page_vaddr;
   bool created_rpage;
 
+  printk("\n\nRSWAP STORE RUNNING\n\n");
+
   /* return if the module hasn't been enabled */
   if (unlikely(!rswap_enabled))
     return -ENODEV;
@@ -99,6 +101,8 @@ static int rswap_frontswap_load(unsigned type, pgoff_t offset,
   struct rswap_page *rpage;
   void *page_vaddr;
 
+  printk("\n\n RSWAP LOAD RUNNING\n\n");
+
   /* find page */
   rpage = rhashtable_lookup_fast(&ht, &offset, htparams);
   if (unlikely(!rpage)) {
@@ -119,6 +123,8 @@ static void rswap_frontswap_invalidate_page(unsigned type, pgoff_t offset)
 {
   struct rswap_page *rpage;
 
+  printk("\n\nRSWAP INVALIDATE PAGE RUNNING\n\n");
+
   rpage = rhashtable_lookup_fast(&ht, &offset, htparams);
   /* page not in ht anymore, maybe loaded, return */
   if (!rpage)
@@ -137,12 +143,15 @@ static void rswap_frontswap_invalidate_page(unsigned type, pgoff_t offset)
 
 static void rswap_frontswap_invalidate_area(unsigned type)
 {
+  printk("\n\nRSWAP INVALIDATE AREA \n\n");
+
   pr_err("rswap_frontswap_invalidate_area\n");
 }
 
 static void rswap_frontswap_init(unsigned type)
 {
   int err;
+  printk("\n\nRSWAP FRONTSWAP INIT\n\n");
 
   pr_err("rswap_frontswap_init start\n");
   err = rhashtable_init(&ht, &htparams);
@@ -170,6 +179,7 @@ static struct frontswap_ops rswap_frontswap_ops = {
 
 static int __init rswap_init_debugfs(void)
 {
+  printk("\n\n RSWAP DEBUGFS INIT\n\n");
   struct dentry *root = debugfs_create_dir("rswap", NULL);
   if (!root)
     return -ENXIO;
@@ -183,6 +193,8 @@ static int __init rswap_init_debugfs(void)
 
 static int __init init_rswap(void)
 {
+  printk("\n\n RSWAP INIT\n\n");
+
   frontswap_register_ops(&rswap_frontswap_ops);
   if (rswap_init_debugfs())
     pr_warn("rswap debugfs failed\n");

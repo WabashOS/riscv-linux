@@ -61,7 +61,7 @@ KBUILD_CFLAGS += -mno-save-restore
 
 head-y := arch/riscv/kernel/head.o
 
-core-y += arch/riscv/kernel/ arch/riscv/mm/
+core-y += arch/riscv/kernel/ arch/riscv/mm/ arch/riscv/pfa/
 
 libs-y += arch/riscv/lib/
 

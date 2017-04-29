@@ -13,4 +13,10 @@ dir /usr/sbin 755 0 0
 dir /etc 755 0 0
 file /etc/inittab inittab 644 0 0
 dir /lib 755 0 0
-file /usr/bin/hello /home/xarc/scratch/hello 755 0 0 
+dir /mybin 755 0 0
+file /mybin/unit pfa_tests/unit/unit 755 0 0 
+file /mybin/qsort pfa_tests/qsort/qsort 755 0 0 
+file /mybin/init_cgrp.sh pfa_tests/util/init_cgrp.sh 755 0 0
+file /mybin/run_cg.sh pfa_tests/util/run_cg.sh 755 0 0
+file /mybin/init_swap.sh pfa_tests/util/init_swap.sh 755 0 0
+file /mybin/test.sh pfa_tests/util/test.sh 755 0 0
