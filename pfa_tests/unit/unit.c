@@ -49,6 +49,7 @@ bool test_single(void) {
   uint8_t val;
   printf("Gonna poke it\n");
   val = pg[0];
+  pg[0] = 84;
 
   printf("I poked it (%d)!\n", val);
 
