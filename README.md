@@ -96,6 +96,17 @@ Note that the comitted arch/riscv/initramfs.txt is tuned for my system, be sure 
 
         $ make ARCH=riscv vmlinux
 
+1. Update Kernel Headers
+We've added at least one syscall to linux for testing. We need to inform the toolchain about it. Do the following:
+
+    $ make ARCH=riscv headers_check
+    $ make ARCH=riscv INSTALL_HDR_PATH=$TOP/riscv-tools/riscv-gnu-toolchain/linux-headers headers_install
+
+Rebuild `riscv64-unknown-linux-gnu-gcc` with the `linux` target:
+
+    $ cd path/to/riscv-gnu-toolchain
+    $ make linux
+
 # BBL
 The berkeley boot loader ties everything together and creates a bootable image that qemu can run. Configure and build it thusly (The riscv-pk 'build' directory might need to be created first):
 
