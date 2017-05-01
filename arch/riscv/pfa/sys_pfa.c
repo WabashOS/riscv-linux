@@ -4,10 +4,14 @@
 
 #include<linux/sched.h>
 
+/* Comment this out to emulate the PFA with protection bits.
+ * Leave uncommented to use the actual PFA */ 
+/* #define USE_PFA */
+
 /* Used for registering a process with the PFA subsystem.
  * Only one process an use the PFA for now */
-pid_t pfa_pid;
-unsigned long pfa_addr;
+pid_t pfa_pid = -1;
+unsigned long pfa_addr = 0;
 
 /* ugly hack to initialize system, I'll figure out a real way later */
 bool pfa_initp = false;
@@ -63,13 +67,16 @@ SYSCALL_DEFINE1(pfa, unsigned long, pg_vaddr)
   ptep = get_locked_pte(mm, pg_vaddr, &ptl); 
   pte_paddr = virt_to_phys(ptep);
 
+#ifndef USE_PFA
   /* This is a minimal test that doesn't involve the actual PFA */
-  /* set_pte(ptep, pte_wrprotect(*ptep)); */
-  
+  /* Clear the present bit to trick the system into "swapping" it back in */
+  set_pte(ptep, pte_clear_present(*ptep));
+#else
   /* Evict the page and give it's freshly vacated page-frame to the PFA */
-  pfa_evict(pte_paddr);
-  pfa_free(pte_paddr);
-  
+  /* pfa_evict(pte_paddr); */
+  /* pfa_free(pte_paddr); */
+#endif
+
   /* Unlock PTE, a little scary but I don't know how to detect if someone
    * is trying to mess with it and we can't just hang if they do*/
   pte_unmap_unlock(ptep, ptl);

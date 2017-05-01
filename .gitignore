@@ -9,6 +9,9 @@
 !pfa_tests/
 !.config
 
+# Specific kernel files that we changed
+!mm/memory.c
+
 # The arch/.gitignore and arch/riscv/.gitignore have patterns to un-ignore the
 # appropriate files.
 

@@ -6,6 +6,12 @@
 #include <string.h>
 #include <sys/syscall.h>
 
+uint64_t get_cycle(void)
+{
+  register unsigned long __v;
+  __asm__ __volatile__ ("rdcycle %0" : "=r" (__v));
+  return __v;
+}
 
 bool test_single(void);
 bool test_multi(void); 
@@ -46,12 +52,17 @@ bool test_single(void) {
   printf("user called sys\n");
 
   /* Try to access */
+  uint64_t before = 0;
+  uint64_t after = 0;
   uint8_t val;
   printf("Gonna poke it\n");
+  before = get_cycle();
   val = pg[0];
   pg[0] = 84;
+  after = get_cycle();
 
   printf("I poked it (%d)!\n", val);
+  printf("Cycles: %ld\n", after - before);
 
   if(val == 42) {
     return true;
