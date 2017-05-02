@@ -2500,6 +2500,16 @@ void unmap_mapping_range(struct address_space *mapping,
 }
 EXPORT_SYMBOL(unmap_mapping_range);
 
+/* XXX PFA */
+static inline uint64_t get_cycle(void)
+{
+  register unsigned long __v;
+  __asm__ __volatile__ ("rdcycle %0" : "=r" (__v));
+  return __v;
+}
+/* #Cycles to access 1 page from remote memory */
+#define PFA_ACCESS_DELAY 1000
+
 /*
  * We enter with non-exclusive mmap_sem (to exclude vma changes,
  * but allow concurrent faults), and pte mapped but not yet locked.
@@ -2527,7 +2537,18 @@ static int do_swap_page(struct mm_struct *mm, struct vm_area_struct *vma,
   extern unsigned long pfa_addr;
   if (pfa_pid == task_tgid_vnr(current) &&
       pfa_addr == (address & (~0 << PAGE_SHIFT))) {
+    
+    /* Insert delay to account for remote memory access time as if we had a
+     * real driver here */
+    uint64_t target_cycle = get_cycle() + PFA_ACCESS_DELAY;
+    volatile uint64_t current_cycle;
     printk("I saw the special process. Addr was: %lx!\n", address);
+    printk("Waiting for %d cycles\n", PFA_ACCESS_DELAY);
+    do {
+      current_cycle = get_cycle();
+    } while(target_cycle > current_cycle);
+    
+    /* Mark the page "present" and return */
     set_pte(page_table, pte_mk_present(orig_pte));
     pte_unmap(page_table);
     goto out;
