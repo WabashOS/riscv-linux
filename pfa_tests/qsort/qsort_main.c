@@ -33,7 +33,7 @@
 //--------------------------------------------------------------------------
 // Input/Reference Data
 
-#define type int
+#define type int32_t
 
 // Swap macro for swapping two values.
 
@@ -146,8 +146,18 @@ void sort(size_t n, type arr[])
 //--------------------------------------------------------------------------
 // Main
 
+uint64_t get_cycle(void)
+{
+  register unsigned long __v;
+  __asm__ __volatile__ ("rdcycle %0" : "=r" (__v));
+  return __v;
+}
+
 int main( int argc, char* argv[] )
 {
+  uint64_t start, end;
+  start = get_cycle();
+
   if(argc != 2) {
     printf("usage: ./qsort SIZE\n\tSIZE - size of array to sort (in bytes)\n");
     return EXIT_FAILURE;
@@ -166,6 +176,8 @@ int main( int argc, char* argv[] )
   // Do the sort
   sort(n, arr);
   printf("Prolly sorted 'em by now\n");
+  end = get_cycle();
+  printf("Took %ld Cycles\n", end - start);
 
   return EXIT_SUCCESS;
 }
