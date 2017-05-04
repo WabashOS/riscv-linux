@@ -1,8 +1,7 @@
 dir /dev 755 0 0
 nod /dev/console 644 0 0 c 5 1
 nod /dev/null 644 0 0 c 1 3
-dir /proc 755 0 0
-dir /sys 755 0 0
+dir /proc 755 0 0 dir /sys 755 0 0
 slink /init /bin/busybox 755 0 0
 dir /bin 755 0 0
 file /bin/busybox /data/repos/busybox-1.23.1/busybox 755 0 0
@@ -20,3 +19,4 @@ file /mybin/init_cgrp.sh pfa_tests/util/init_cgrp.sh 755 0 0
 file /mybin/run_cg.sh pfa_tests/util/run_cg.sh 755 0 0
 file /mybin/init_swap.sh pfa_tests/util/init_swap.sh 755 0 0
 file /mybin/test.sh pfa_tests/util/test.sh 755 0 0
+file /mybin/mytime pfa_tests/util/mytime 755 0 0

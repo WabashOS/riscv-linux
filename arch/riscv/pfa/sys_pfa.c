@@ -6,7 +6,7 @@
 
 /* Comment this out to emulate the PFA with protection bits.
  * Leave uncommented to use the actual PFA */ 
-/* #define USE_PFA */
+#define USE_PFA
 
 /* Used for registering a process with the PFA subsystem.
  * Only one process an use the PFA for now */
