@@ -2508,7 +2508,7 @@ static inline uint64_t get_cycle(void)
   return __v;
 }
 /* #Cycles to access 1 page from remote memory */
-#define PFA_ACCESS_DELAY 1000
+#define PFA_ACCESS_DELAY 0
 
 /*
  * We enter with non-exclusive mmap_sem (to exclude vma changes,

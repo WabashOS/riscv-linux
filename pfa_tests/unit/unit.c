@@ -40,10 +40,17 @@ int main(int argc, char *argv[]) {
 }
 
 bool test_single(void) {
-  /* Allocate a single page from the heap */
+  uint64_t before = 0;
+  uint64_t after = 0;
+ /* Allocate a single page from the heap */
   uint8_t *pg;
   posix_memalign((void**)&pg, getpagesize(), getpagesize());
   memset(pg, 42, getpagesize());
+
+  /* Timer Verification */
+  before = get_cycle();
+  after = get_cycle();
+  printf("Timer verification: %ld\n", after - before);
 
   /* Protect the page */
   /* printf("Giving page %p to pfa\n", pg); */
@@ -52,8 +59,6 @@ bool test_single(void) {
   printf("user called sys\n");
 
   /* Try to access */
-  uint64_t before = 0;
-  uint64_t after = 0;
   uint8_t val;
   printf("Gonna poke it\n");
   before = get_cycle();
