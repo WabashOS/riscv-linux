@@ -40,6 +40,10 @@
 #define SWAP(a,b) do { typeof(a) temp=(a);(a)=(b);(b)=temp; } while (0)
 #define SWAP_IF_GREATER(a, b) do { if ((a) > (b)) SWAP(a, b); } while (0)
 
+/* A global counter for progress updates */
+int64_t ins_count = 0;
+int64_t print_count = 0;
+
 //--------------------------------------------------------------------------
 // Quicksort function
 
@@ -47,6 +51,14 @@ static void insertion_sort(size_t n, type arr[])
 {
   type *i, *j;
   type value;
+  if((++ins_count % 65536) == 0) {
+    print_count++;
+    if((print_count % 20) == 0) {
+      printf("\33[2K\r");
+    }
+    putchar('.');
+    fflush(stdout);
+  }
   for (i = arr+1; i < arr+n; i++)
   {
     value = *i;
@@ -75,6 +87,7 @@ void sort(size_t n, type arr[])
   type* stack[NSTACK];
   type** stackp = stack;
 
+  printf("\n");
   for (;;)
   {
 #if HOST_DEBUG
@@ -141,17 +154,25 @@ void sort(size_t n, type arr[])
       }
     }
   }
+  printf("\n");
 }
 
 //--------------------------------------------------------------------------
 // Main
 
+#ifdef RISCV
 uint64_t get_cycle(void)
 {
   register unsigned long __v;
   __asm__ __volatile__ ("rdcycle %0" : "=r" (__v));
   return __v;
 }
+#else
+uint64_t get_cycle(void)
+{
+  return 0;
+}
+#endif
 
 int main( int argc, char* argv[] )
 {
