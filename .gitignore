@@ -11,6 +11,7 @@
 
 # Specific kernel files that we changed
 !mm/memory.c
+!include/linux/pfa_helper.h
 
 # The arch/.gitignore and arch/riscv/.gitignore have patterns to un-ignore the
 # appropriate files.

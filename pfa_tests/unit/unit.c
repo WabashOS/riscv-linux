@@ -6,7 +6,7 @@
 #include <string.h>
 #include <sys/syscall.h>
 
-uint64_t get_cycle(void)
+static inline uint64_t get_cycle(void)
 {
   register unsigned long __v;
   __asm__ __volatile__ ("rdcycle %0" : "=r" (__v));
@@ -60,14 +60,14 @@ bool test_single(void) {
 
   /* Try to access */
   uint8_t val;
-  printf("Gonna poke it\n");
+  printf("Gonna poke it (cycle %ld)\n", get_cycle());
   before = get_cycle();
   val = pg[0];
   pg[0] = 84;
   after = get_cycle();
 
-  printf("I poked it (%d)!\n", val);
-  printf("Cycles: %ld\n", after - before);
+  printf("I poked it (cycle %ld)!\n", after);
+  printf("Total Cycles: %ld\n", after - before);
 
   if(val == 42) {
     return true;

@@ -63,6 +63,7 @@
 #include <linux/dma-debug.h>
 #include <linux/debugfs.h>
 #include <linux/userfaultfd_k.h>
+#include <linux/pfa_helper.h>
 
 #include <asm/io.h>
 #include <asm/mmu_context.h>
@@ -2501,12 +2502,6 @@ void unmap_mapping_range(struct address_space *mapping,
 EXPORT_SYMBOL(unmap_mapping_range);
 
 /* XXX PFA */
-static inline uint64_t get_cycle(void)
-{
-  register unsigned long __v;
-  __asm__ __volatile__ ("rdcycle %0" : "=r" (__v));
-  return __v;
-}
 /* #Cycles to access 1 page from remote memory */
 #define PFA_ACCESS_DELAY 0
 
@@ -2533,16 +2528,13 @@ static int do_swap_page(struct mm_struct *mm, struct vm_area_struct *vma,
 
   /* XXX PFA */
   /* Check for my special page and process */
-  extern pid_t pfa_pid;
-  extern unsigned long pfa_addr;
-  if (pfa_pid == task_tgid_vnr(current) &&
-      pfa_addr == (address & (~0 << PAGE_SHIFT))) {
+  if (IS_PFA_ADDR(address)) {
     
     /* Insert delay to account for remote memory access time as if we had a
      * real driver here */
     uint64_t target_cycle = get_cycle() + PFA_ACCESS_DELAY;
     volatile uint64_t current_cycle;
-    printk("I saw the special process. Addr was: %lx!\n", address);
+    printk("I saw the special process. (cycle %ld) !\n", get_cycle());
     printk("Waiting for %d cycles\n", PFA_ACCESS_DELAY);
     do {
       current_cycle = get_cycle();
