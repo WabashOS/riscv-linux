@@ -2702,8 +2702,9 @@ int do_swap_page(struct vm_fault *vmf)
     } while(target_cycle > current_cycle);
     
     /* Mark the page "present" and return */
-    set_pte(vmf->page_table, pte_mk_present(vmf->orig_pte));
-    pte_unmap(vmf->page_table);
+    /* XXX I'm supposed to lock vmf-pte using vmf-ptl but I don't know how...*/
+    set_pte(vmf->pte, pte_mk_present(vmf->orig_pte));
+    pte_unmap(vmf->pte);
     goto out;
   }
 
