@@ -1,3 +1,24 @@
+/*
+ * SMP initialisation and IPI support
+ * Based on arch/arm64/kernel/smp.c
+ *
+ * Copyright (C) 2012 ARM Ltd.
+ * Copyright (C) 2015 Regents of the University of California
+ * Copyright (C) 2017 SiFive
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
 #include <linux/interrupt.h>
 #include <linux/smp.h>
 #include <linux/sched.h>
@@ -20,15 +41,17 @@ enum ipi_message_type {
 irqreturn_t handle_ipi(void)
 {
 	unsigned long *pending_ipis = &ipi_data[smp_processor_id()].bits;
-	unsigned long ops;
 
 	/* Clear pending IPI */
-	if (!sbi_clear_ipi())
-		return IRQ_NONE;
+	csr_clear(sip, SIE_SSIE);
 
-	mb();	/* Order interrupt and bit testing. */
-	while ((ops = xchg(pending_ipis, 0)) != 0) {
+	while (true) {
+		unsigned long ops;
+
 		mb();	/* Order bit clearing and data access. */
+
+		if ((ops = xchg(pending_ipis, 0)) == 0)
+			return IRQ_HANDLED;
 
 		if (ops & (1 << IPI_RESCHEDULE))
 			scheduler_ipi();
@@ -54,8 +77,7 @@ send_ipi_message(const struct cpumask *to_whom, enum ipi_message_type operation)
 		set_bit(operation, &ipi_data[i].bits);
 
 	mb();
-	for_each_cpu(i, to_whom)
-		sbi_send_ipi(i);
+	sbi_send_ipi(cpumask_bits(to_whom));
 }
 
 void arch_send_call_function_ipi_mask(struct cpumask *mask)

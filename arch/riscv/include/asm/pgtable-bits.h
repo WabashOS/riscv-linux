@@ -1,15 +1,27 @@
+/*
+ * Copyright (C) 2012 Regents of the University of California
+ *
+ *   This program is free software; you can redistribute it and/or
+ *   modify it under the terms of the GNU General Public License
+ *   as published by the Free Software Foundation, version 2.
+ *
+ *   This program is distributed in the hope that it will be useful, but
+ *   WITHOUT ANY WARRANTY; without even the implied warranty of
+ *   MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, GOOD TITLE or
+ *   NON INFRINGEMENT.  See the GNU General Public License for
+ *   more details.
+ */
+
 #ifndef _ASM_RISCV_PGTABLE_BITS_H
 #define _ASM_RISCV_PGTABLE_BITS_H
 
 /*
- * RV32Sv32 page table entry:
- * | 31 10 | 9             7 | 6 | 5 | 4  1 | 0
- *    PFN    reserved for SW   D   R   TYPE   V
- *
- * RV64Sv39 / RV64Sv48 page table entry:
- * | 63           48 | 47 10 | 9             7 | 6 | 5 | 4  1 | 0
- *   reserved for HW    PFN    reserved for SW   D   R   TYPE   V
+ * PTE format:
+ * | XLEN-1  10 | 9             8 | 7 | 6 | 5 | 4 | 3 | 2 | 1 | 0
+ *       PFN      reserved for SW   D   A   G   U   X   W   R   V
  */
+
+#define _PAGE_ACCESSED_OFFSET 6
 
 #define _PAGE_PRESENT   (1 << 0)
 #define _PAGE_READ      (1 << 1)    /* Readable */
@@ -17,7 +29,7 @@
 #define _PAGE_EXEC      (1 << 3)    /* Executable */
 #define _PAGE_USER      (1 << 4)    /* User */
 #define _PAGE_GLOBAL    (1 << 5)    /* Global */
-#define _PAGE_ACCESSED  (1 << 6)    /* Set by hardware on any access */
+#define _PAGE_ACCESSED  (1 << _PAGE_ACCESSED_OFFSET)  /* Set by hardware on any access */
 #define _PAGE_DIRTY     (1 << 7)    /* Set by hardware on any write */
 #define _PAGE_SOFT      (1 << 8)    /* Reserved for software */
 #define _PAGE_REMOTE    (1l << 48)   /* Remote (handled by PFA) */

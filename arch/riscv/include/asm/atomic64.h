@@ -1,3 +1,13 @@
+/*
+ * Copyright (C) 2007 Red Hat, Inc. All Rights Reserved.
+ * Copyright (C) 2012 Regents of the University of California
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public Licence
+ * as published by the Free Software Foundation; either version
+ * 2 of the Licence, or (at your option) any later version.
+ */
+
 #ifndef _ASM_RISCV_ATOMIC64_H
 #define _ASM_RISCV_ATOMIC64_H
 
@@ -47,6 +57,17 @@ static inline void atomic64_add(s64 a, atomic64_t *v)
 		: "r" (a));
 }
 
+static inline long atomic64_fetch_add(unsigned long mask, atomic64_t *v)
+{
+        long out;
+
+        __asm__ __volatile__ (
+                "amoadd.d %2, %1, %0"
+                : "+A" (v->counter), "=r" (out)
+                : "r" (mask));
+        return out;
+}
+
 /**
  * atomic64_sub - subtract the atomic64 variable
  * @i: integer value to subtract
@@ -59,6 +80,17 @@ static inline void atomic64_sub(s64 a, atomic64_t *v)
 	atomic64_add(-a, v);
 }
 
+static inline long atomic64_fetch_sub(unsigned long mask, atomic64_t *v)
+{
+        long out;
+
+        __asm__ __volatile__ (
+                "amosub.d %2, %1, %0"
+                : "+A" (v->counter), "=r" (out)
+                : "r" (mask));
+        return out;
+}
+
 /**
  * atomic64_add_return - add and return
  * @i: integer value to add
@@ -69,6 +101,7 @@ static inline void atomic64_sub(s64 a, atomic64_t *v)
 static inline s64 atomic64_add_return(s64 a, atomic64_t *v)
 {
 	register s64 c;
+
 	__asm__ __volatile__ (
 		"amoadd.d %0, %2, %1"
 		: "=r" (c), "+A" (v->counter)
@@ -171,6 +204,7 @@ static inline int atomic64_add_negative(s64 a, atomic64_t *v)
 static inline s64 atomic64_xchg(atomic64_t *v, s64 n)
 {
 	register s64 c;
+
 	__asm__ __volatile__ (
 		"amoswap.d %0, %2, %1"
 		: "=r" (c), "+A" (v->counter)
@@ -193,6 +227,7 @@ static inline s64 atomic64_cmpxchg(atomic64_t *v, s64 o, s64 n)
 static inline s64 atomic64_dec_if_positive(atomic64_t *v)
 {
 	register s64 prev, rc;
+
 	__asm__ __volatile__ (
 	"0:"
 		"lr.d %0, %2\n"
@@ -252,6 +287,17 @@ static inline void atomic64_and(s64 mask, atomic64_t *v)
 		: "r" (mask));
 }
 
+static inline long atomic64_fetch_and(unsigned long mask, atomic64_t *v)
+{
+        long out;
+
+        __asm__ __volatile__ (
+                "amoand.d %2, %1, %0"
+                : "+A" (v->counter), "=r" (out)
+                : "r" (mask));
+        return out;
+}
+
 /**
  * atomic64_or - Atomically set bits in atomic variable
  * @mask: Mask of the bits to be set
@@ -267,6 +313,17 @@ static inline void atomic64_or(s64 mask, atomic64_t *v)
 		: "r" (mask));
 }
 
+static inline long atomic64_fetch_or(unsigned long mask, atomic64_t *v)
+{
+        long out;
+
+        __asm__ __volatile__ (
+                "amoor.d %2, %1, %0"
+                : "+A" (v->counter), "=r" (out)
+                : "r" (mask));
+        return out;
+}
+
 /**
  * atomic64_xor - Atomically flips bits in atomic variable
  * @mask: Mask of the bits to be flipped
@@ -280,6 +337,17 @@ static inline void atomic64_xor(s64 mask, atomic64_t *v)
 		"amoxor.d zero, %1, %0"
 		: "+A" (v->counter)
 		: "r" (mask));
+}
+
+static inline long atomic64_fetch_xor(unsigned long mask, atomic64_t *v)
+{
+        long out;
+
+        __asm__ __volatile__ (
+                "amoxor.d %2, %1, %0"
+                : "+A" (v->counter), "=r" (out)
+                : "r" (mask));
+        return out;
 }
 
 #endif /* CONFIG_GENERIC_ATOMIC64 */

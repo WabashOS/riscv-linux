@@ -1,8 +1,24 @@
+/*
+ * Copyright (C) 2012 Regents of the University of California
+ * Copyright (C) 2017 SiFive
+ *
+ *   This program is free software; you can redistribute it and/or
+ *   modify it under the terms of the GNU General Public License
+ *   as published by the Free Software Foundation, version 2.
+ *
+ *   This program is distributed in the hope that it will be useful, but
+ *   WITHOUT ANY WARRANTY; without even the implied warranty of
+ *   MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, GOOD TITLE or
+ *   NON INFRINGEMENT.  See the GNU General Public License for
+ *   more details.
+ */
+
 #include <linux/clocksource.h>
 #include <linux/clockchips.h>
 #include <linux/interrupt.h>
 #include <linux/irq.h>
 #include <linux/delay.h>
+#include <linux/of.h>
 
 #include <asm/irq.h>
 #include <asm/csr.h>
@@ -32,7 +48,7 @@ static int riscv_timer_set_shutdown(struct clock_event_device *evt)
 	return 0;
 }
 
-static cycle_t riscv_rdtime(struct clocksource *cs)
+static u64 riscv_rdtime(struct clocksource *cs)
 {
 	return get_cycles();
 }
@@ -71,18 +87,30 @@ void __init init_clockevent(void)
 		.set_state_shutdown = riscv_timer_set_shutdown,
 	};
 
-	clockevents_config_and_register(ce, sbi_timebase(), 100, 0x7fffffff);
+	/* Enable timer interrupts */
+	csr_set(sie, SIE_STIE);
+
+	clockevents_config_and_register(ce, timebase, 100, 0x7fffffff);
+}
+
+static unsigned long __init of_timebase(void)
+{
+	struct device_node *cpu;
+	const __be32 *prop;
+
+	if ((cpu = of_find_node_by_path("/cpus")) &&
+	    (prop = of_get_property(cpu, "timebase-frequency", NULL))) {
+		return be32_to_cpu(*prop);
+	} else {
+		return 10000000;
+	}
 }
 
 void __init time_init(void)
 {
-	timebase = sbi_timebase();
-	lpj_fine = timebase;
-	do_div(lpj_fine, HZ);
+	timebase = of_timebase();
+	lpj_fine = timebase / HZ;
 
 	clocksource_register_hz(&riscv_clocksource, timebase);
 	init_clockevent();
-
-	/* Enable timer interrupts. */
-	csr_set(sie, SIE_STIE);
 }

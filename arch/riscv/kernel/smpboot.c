@@ -1,3 +1,24 @@
+/*
+ * SMP initialisation and IPI support
+ * Based on arch/arm64/kernel/smp.c
+ *
+ * Copyright (C) 2012 ARM Ltd.
+ * Copyright (C) 2015 Regents of the University of California
+ * Copyright (C) 2017 SiFive
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
@@ -10,6 +31,8 @@
 #include <linux/delay.h>
 #include <linux/err.h>
 #include <linux/irq.h>
+#include <linux/of.h>
+#include <linux/sched/task_stack.h>
 #include <asm/mmu_context.h>
 #include <asm/tlbflush.h>
 #include <asm/sections.h>
@@ -27,22 +50,32 @@ void __init smp_prepare_cpus(unsigned int max_cpus)
 
 void __init setup_smp(void)
 {
-	int i, num_cpus = sbi_num_harts();
+	struct device_node *dn = NULL;
+	int hart, im_okay_therefore_i_am = 0;
 
-	for (i = 0; i < min(num_cpus, NR_CPUS); i++) {
-		set_cpu_possible(i, true);
-		set_cpu_present(i, true);
+	while ((dn = of_find_node_by_type(dn, "cpu"))) {
+		if ((hart = riscv_of_processor_hart(dn)) >= 0) {
+			set_cpu_possible(hart, true);
+			set_cpu_present(hart, true);
+			if (hart == smp_processor_id()) {
+				BUG_ON(im_okay_therefore_i_am);
+				im_okay_therefore_i_am = 1;
+			}
+		}
 	}
+
+	BUG_ON(!im_okay_therefore_i_am);
 }
 
 int __cpu_up(unsigned int cpu, struct task_struct *tidle)
 {
 	/* Signal cpu to start */
+	mb();
 	__cpu_up_stack_pointer[cpu] = task_stack_page(tidle) + THREAD_SIZE;
 
 	while (!cpu_online(cpu))
-		;
-	
+		cpu_relax();
+
 	return 0;
 }
 

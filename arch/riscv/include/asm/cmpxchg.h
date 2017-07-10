@@ -1,9 +1,23 @@
+/*
+ * Copyright (C) 2014 Regents of the University of California
+ *
+ *   This program is free software; you can redistribute it and/or
+ *   modify it under the terms of the GNU General Public License
+ *   as published by the Free Software Foundation, version 2.
+ *
+ *   This program is distributed in the hope that it will be useful, but
+ *   WITHOUT ANY WARRANTY; without even the implied warranty of
+ *   MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, GOOD TITLE or
+ *   NON INFRINGEMENT.  See the GNU General Public License for
+ *   more details.
+ */
+
 #ifndef _ASM_RISCV_CMPXCHG_H
 #define _ASM_RISCV_CMPXCHG_H
 
 #include <linux/bug.h>
 
-#ifdef CONFIG_RV_ATOMIC
+#ifdef CONFIG_ISA_A
 
 #include <asm/barrier.h>
 
@@ -75,7 +89,7 @@
 	__ret;								\
 })
 
-#define __cmpxchg_mb(ptr, old, new, size) 			\
+#define __cmpxchg_mb(ptr, old, new, size)			\
 ({								\
 	__typeof__(*(ptr)) __ret;				\
 	smp_mb();						\
@@ -102,10 +116,10 @@
 	cmpxchg_local((ptr), (o), (n));		\
 })
 
-#else /* !CONFIG_RV_ATOMIC */
+#else /* !CONFIG_ISA_A */
 
 #include <asm-generic/cmpxchg.h>
 
-#endif /* CONFIG_RV_ATOMIC */
+#endif /* CONFIG_ISA_A */
 
 #endif /* _ASM_RISCV_CMPXCHG_H */

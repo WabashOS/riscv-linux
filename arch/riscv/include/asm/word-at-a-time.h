@@ -1,8 +1,21 @@
+/*
+ * Copyright (C) 2012 Regents of the University of California
+ *
+ *   This program is free software; you can redistribute it and/or
+ *   modify it under the terms of the GNU General Public License
+ *   as published by the Free Software Foundation, version 2.
+ *
+ *   This program is distributed in the hope that it will be useful, but
+ *   WITHOUT ANY WARRANTY; without even the implied warranty of
+ *   MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, GOOD TITLE or
+ *   NON INFRINGEMENT.  See the GNU General Public License for
+ *   more details.
+ * Derived from arch/x86/include/asm/word-at-a-time.h
+ */
+
 #ifndef _ASM_RISCV_WORD_AT_A_TIME_H
 #define _ASM_RISCV_WORD_AT_A_TIME_H
 
-#ifdef __RISCVEL
-/* Derived from arch/x86/include/asm/word-at-a-time.h */
 
 #include <linux/kernel.h>
 
@@ -39,9 +52,5 @@ static inline unsigned long find_zero(unsigned long mask)
 
 /* The mask we created is directly usable as a bytemask */
 #define zero_bytemask(mask) (mask)
-
-#else /* !__RISCVEL */
-#include <asm-generic/word-at-a-time.h>
-#endif /* __RISCVEL */
 
 #endif /* _ASM_RISCV_WORD_AT_A_TIME_H */

@@ -1,3 +1,18 @@
+/*
+ * Copyright (C) 2009 Chen Liqin <liqin.chen@sunplusct.com>
+ * Copyright (C) 2012 Regents of the University of California
+ *
+ *   This program is free software; you can redistribute it and/or
+ *   modify it under the terms of the GNU General Public License
+ *   as published by the Free Software Foundation, version 2.
+ *
+ *   This program is distributed in the hope that it will be useful, but
+ *   WITHOUT ANY WARRANTY; without even the implied warranty of
+ *   MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, GOOD TITLE or
+ *   NON INFRINGEMENT.  See the GNU General Public License for
+ *   more details.
+ */
+
 #ifndef _ASM_RISCV_THREAD_INFO_H
 #define _ASM_RISCV_THREAD_INFO_H
 
@@ -7,8 +22,8 @@
 #include <linux/const.h>
 
 /* thread information allocation */
-#define THREAD_SIZE_ORDER 	(1)
-#define THREAD_SIZE 		(PAGE_SIZE << THREAD_SIZE_ORDER)
+#define THREAD_SIZE_ORDER	(1)
+#define THREAD_SIZE		(PAGE_SIZE << THREAD_SIZE_ORDER)
 
 #ifndef __ASSEMBLY__
 
@@ -51,12 +66,11 @@ struct thread_info {
 
 /*
  * Pointer to the thread_info struct of the current process
- * Assumes that the kernel mode stack (thread_union) is THREAD_SIZE-aligned
  */
 static inline struct thread_info *current_thread_info(void)
 {
-	register unsigned long sp __asm__ ("sp");
-	return (struct thread_info *)(sp & ~(THREAD_SIZE - 1));
+	register struct thread_info *tp __asm__ ("tp");
+	return tp;
 }
 
 #endif /* !__ASSEMBLY__ */

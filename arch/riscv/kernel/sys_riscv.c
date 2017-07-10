@@ -1,3 +1,18 @@
+/*
+ * Copyright (C) 2012 Regents of the University of California
+ * Copyright (C) 2014 Darius Rad <darius@bluespec.com>
+ *
+ *   This program is free software; you can redistribute it and/or
+ *   modify it under the terms of the GNU General Public License
+ *   as published by the Free Software Foundation, version 2.
+ *
+ *   This program is distributed in the hope that it will be useful, but
+ *   WITHOUT ANY WARRANTY; without even the implied warranty of
+ *   MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, GOOD TITLE or
+ *   NON INFRINGEMENT.  See the GNU General Public License for
+ *   more details.
+ */
+
 #include <linux/syscalls.h>
 #include <asm/unistd.h>
 
@@ -24,7 +39,7 @@ SYSCALL_DEFINE6(mmap2, unsigned long, addr, unsigned long, len,
 }
 #endif /* !CONFIG_64BIT */
 
-#ifdef CONFIG_RV_SYSRISCV_ATOMIC
+#ifdef CONFIG_SYSRISCV_ATOMIC
 SYSCALL_DEFINE4(sysriscv, unsigned long, cmd, unsigned long, arg1,
 	unsigned long, arg2, unsigned long, arg3)
 {
@@ -67,4 +82,4 @@ SYSCALL_DEFINE4(sysriscv, unsigned long, cmd, unsigned long, arg1,
 
 	return -EINVAL;
 }
-#endif /* CONFIG_RV_SYSRISCV_ATOMIC */
+#endif /* CONFIG_SYSRISCV_ATOMIC */

@@ -1,3 +1,19 @@
+/*
+ * Copyright (C) 2012 Regents of the University of California
+ *
+ *   This program is free software; you can redistribute it and/or
+ *   modify it under the terms of the GNU General Public License
+ *   as published by the Free Software Foundation, version 2.
+ *
+ *   This program is distributed in the hope that it will be useful, but
+ *   WITHOUT ANY WARRANTY; without even the implied warranty of
+ *   MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, GOOD TITLE or
+ *   NON INFRINGEMENT.  See the GNU General Public License for
+ *   more details.
+ *
+ * This file was copied from include/asm-generic/uaccess.h
+ */
+
 #ifndef _ASM_RISCV_UACCESS_H
 #define _ASM_RISCV_UACCESS_H
 
@@ -11,10 +27,10 @@
 #include <asm/asm.h>
 
 #ifdef CONFIG_RV_PUM
-#define __enable_user_access()						\
-	__asm__ __volatile__ ("csrc sstatus, %0" : : "r" (SR_PUM))
-#define __disable_user_access()						\
-	__asm__ __volatile__ ("csrs sstatus, %0" : : "r" (SR_PUM))
+#define __enable_user_access()							\
+	__asm__ __volatile__ ("csrs sstatus, %0" : : "r" (SR_SUM) : "memory")
+#define __disable_user_access()							\
+	__asm__ __volatile__ ("csrc sstatus, %0" : : "r" (SR_SUM) : "memory")
 #else
 #define __enable_user_access()
 #define __disable_user_access()
@@ -119,6 +135,7 @@ extern int fixup_exception(struct pt_regs *);
 #define __get_user_asm(insn, x, ptr, err)			\
 do {								\
 	uintptr_t __tmp;					\
+	__typeof__(x) __x;					\
 	__enable_user_access();					\
 	__asm__ __volatile__ (					\
 		"1:\n"						\
@@ -135,9 +152,10 @@ do {								\
 		"	.balign " SZPTR "\n"			\
 		"	" PTR " 1b, 3b\n"			\
 		"	.previous"				\
-		: "+r" (err), "=&r" (x), "=r" (__tmp)		\
+		: "+r" (err), "=&r" (__x), "=r" (__tmp)		\
 		: "m" (*(ptr)), "i" (-EFAULT));			\
 	__disable_user_access();				\
+	(x) = __x;						\
 } while (0)
 #else /* !CONFIG_MMU */
 #define __get_user_asm(insn, x, ptr, err)			\
@@ -215,7 +233,7 @@ do {								\
  */
 #define __get_user(x, ptr)					\
 ({								\
-	register int __gu_err = 0;				\
+	register long __gu_err = 0;				\
 	const __typeof__(*(ptr)) __user *__gu_ptr = (ptr);	\
 	__chk_user_ptr(__gu_ptr);				\
 	switch (sizeof(*__gu_ptr)) {				\
@@ -305,7 +323,7 @@ do {								\
 #define __put_user_8(x, ptr, err)				\
 do {								\
 	u32 __user *__ptr = (u32 __user *)(ptr);		\
-	u64 __x = (__typeof__((x)-(x)))(x);	 		\
+	u64 __x = (__typeof__((x)-(x)))(x);			\
 	uintptr_t __tmp;					\
 	__enable_user_access();					\
 	__asm__ __volatile__ (					\
@@ -359,7 +377,7 @@ do {								\
  */
 #define __put_user(x, ptr)					\
 ({								\
-	register int __pu_err = 0;				\
+	register long __pu_err = 0;				\
 	__typeof__(*(ptr)) __user *__gu_ptr = (ptr);		\
 	__chk_user_ptr(__gu_ptr);				\
 	switch (sizeof(*__gu_ptr)) {				\
@@ -410,37 +428,16 @@ do {								\
 extern unsigned long __must_check __copy_user(void __user *to,
 	const void __user *from, unsigned long n);
 
-static inline long __must_check __copy_from_user(void *to,
-		const void __user *from, unsigned long n)
+static inline unsigned long
+raw_copy_from_user(void *to, const void __user *from, unsigned long n)
 {
 	return __copy_user(to, from, n);
 }
 
-static inline long __must_check __copy_to_user(void __user *to,
-		const void *from, unsigned long n)
+static inline unsigned long
+raw_copy_to_user(void __user *to, const void *from, unsigned long n)
 {
 	return __copy_user(to, from, n);
-}
-
-#define __copy_from_user_inatomic(to, from, n) \
-	__copy_from_user((to), (from), (n))
-#define __copy_to_user_inatomic(to, from, n) \
-	__copy_to_user((to), (from), (n))
-
-static inline long copy_from_user(void *to,
-		const void __user * from, unsigned long n)
-{
-	might_fault();
-	return access_ok(VERIFY_READ, from, n) ?
-		__copy_from_user(to, from, n) : n;
-}
-
-static inline long copy_to_user(void __user *to,
-		const void *from, unsigned long n)
-{
-	might_fault();
-	return access_ok(VERIFY_WRITE, to, n) ?
-		__copy_to_user(to, from, n) : n;
 }
 
 extern long strncpy_from_user(char *dest, const char __user *src, long count);

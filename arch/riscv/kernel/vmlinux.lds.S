@@ -1,3 +1,18 @@
+/*
+ * Copyright (C) 2012 Regents of the University of California
+ * Copyright (C) 2017 SiFive
+ *
+ *   This program is free software; you can redistribute it and/or
+ *   modify it under the terms of the GNU General Public License
+ *   as published by the Free Software Foundation, version 2.
+ *
+ *   This program is distributed in the hope that it will be useful, but
+ *   WITHOUT ANY WARRANTY; without even the implied warranty of
+ *   MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, GOOD TITLE or
+ *   NON INFRINGEMENT.  See the GNU General Public License for
+ *   more details.
+ */
+
 #define LOAD_OFFSET PAGE_OFFSET
 #include <asm/vmlinux.lds.h>
 #include <asm/page.h>
@@ -35,6 +50,7 @@ SECTIONS
 		_stext = .;
 		TEXT_TEXT
 		SCHED_TEXT
+		CPUIDLE_TEXT
 		LOCK_TEXT
 		KPROBES_TEXT
 		ENTRY_TEXT
@@ -45,19 +61,21 @@ SECTIONS
 
 	/* Start of data section */
 	_sdata = .;
-	RO_DATA_SECTION(PAGE_SIZE)
-	RW_DATA_SECTION(0x40, PAGE_SIZE, THREAD_SIZE)
-	.sdata : {
-		_gp = . + 0x800;
-		*(.sdata*)
-	}
+	RO_DATA_SECTION(L1_CACHE_BYTES)
 	.srodata : {
 		*(.srodata*)
 	}
-	/* End of data section */
-	_edata = .;
 
-	BSS_SECTION(0x20, 0, 0x20)
+	RW_DATA_SECTION(L1_CACHE_BYTES, PAGE_SIZE, THREAD_SIZE)
+	.sdata : {
+		__global_pointer$ = . + 0x800;
+		*(.sdata*)
+		/* End of data section */
+		_edata = .;
+		*(.sbss*)
+	}
+
+	BSS_SECTION(0, 0, 0)
 
 	EXCEPTION_TABLE(0x10)
 	NOTES

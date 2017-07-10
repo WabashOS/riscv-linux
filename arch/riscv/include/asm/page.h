@@ -1,3 +1,20 @@
+/*
+ * Copyright (C) 2009 Chen Liqin <liqin.chen@sunplusct.com>
+ * Copyright (C) 2012 Regents of the University of California
+ * Copyright (C) 2017 SiFive
+ * Copyright (C) 2017 XiaojingZhu <zhuxiaoj@ict.ac.cn>
+ *
+ *   This program is free software; you can redistribute it and/or
+ *   modify it under the terms of the GNU General Public License
+ *   as published by the Free Software Foundation, version 2.
+ *
+ *   This program is distributed in the hope that it will be useful, but
+ *   WITHOUT ANY WARRANTY; without even the implied warranty of
+ *   MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, GOOD TITLE or
+ *   NON INFRINGEMENT.  See the GNU General Public License for
+ *   more details.
+ */
+
 #ifndef _ASM_RISCV_PAGE_H
 #define _ASM_RISCV_PAGE_H
 
@@ -5,7 +22,7 @@
 #include <linux/const.h>
 
 #define PAGE_SHIFT	(12)
-#define PAGE_SIZE	(_AC(1,UL) << PAGE_SHIFT)
+#define PAGE_SIZE	(_AC(1, UL) << PAGE_SHIFT)
 #define PAGE_MASK	(~(PAGE_SIZE - 1))
 
 #ifdef __KERNEL__
@@ -16,10 +33,12 @@
  * physical memory (aligned on a page boundary).
  */
 #ifdef CONFIG_64BIT
-#define PAGE_OFFSET		_AC(0xffffffff80000000,UL)
+#define PAGE_OFFSET		_AC(0xffffffff80000000, UL)
 #else
-#define PAGE_OFFSET		_AC(0xc0000000,UL)
+#define PAGE_OFFSET		_AC(0xc0000000, UL)
 #endif
+
+#define KERN_VIRT_SIZE (-PAGE_OFFSET)
 
 #ifndef __ASSEMBLY__
 
@@ -106,7 +125,7 @@ extern unsigned long min_low_pfn;
 
 #endif /* __KERNEL__ */
 
-#define VM_DATA_DEFAULT_FLAGS	(VM_READ | VM_WRITE | VM_EXEC | \
+#define VM_DATA_DEFAULT_FLAGS	(VM_READ | VM_WRITE | \
 				 VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC)
 
 #include <asm-generic/memory_model.h>

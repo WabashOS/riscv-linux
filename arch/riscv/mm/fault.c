@@ -1,3 +1,26 @@
+/*
+ * Copyright (C) 2009 Sunplus Core Technology Co., Ltd.
+ *  Lennox Wu <lennox.wu@sunplusct.com>
+ *  Chen Liqin <liqin.chen@sunplusct.com>
+ * Copyright (C) 2012 Regents of the University of California
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, see the file COPYING, or write
+ * to the Free Software Foundation, Inc.,
+ * 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+ */
+
+
 #include <linux/mm.h>
 #include <linux/kernel.h>
 #include <linux/interrupt.h>
@@ -80,15 +103,15 @@ good_area:
 	code = SEGV_ACCERR;
 
 	switch (cause) {
-	case EXC_INST_ACCESS:
+	case EXC_INST_PAGE_FAULT:
 		if (!(vma->vm_flags & VM_EXEC))
 			goto bad_area;
 		break;
-	case EXC_LOAD_ACCESS:
+	case EXC_LOAD_PAGE_FAULT:
 		if (!(vma->vm_flags & VM_READ))
 			goto bad_area;
 		break;
-	case EXC_STORE_ACCESS:
+	case EXC_STORE_PAGE_FAULT:
 		if (!(vma->vm_flags & VM_WRITE))
 			goto bad_area;
 		flags |= FAULT_FLAG_WRITE;
@@ -102,7 +125,7 @@ good_area:
 	 * make sure we exit gracefully rather than endlessly redo
 	 * the fault.
 	 */
-	fault = handle_mm_fault(mm, vma, addr, flags);
+	fault = handle_mm_fault(vma, addr, flags);
 
 	/*
 	 * If we need to retry but a fatal signal is pending, handle the
@@ -208,6 +231,7 @@ vmalloc_fault:
 	{
 		pgd_t *pgd, *pgd_k;
 		pud_t *pud, *pud_k;
+		p4d_t *p4d, *p4d_k;
 		pmd_t *pmd, *pmd_k;
 		pte_t *pte_k;
 		int index;
@@ -231,8 +255,13 @@ vmalloc_fault:
 			goto no_context;
 		set_pgd(pgd, *pgd_k);
 
-		pud = pud_offset(pgd, addr);
-		pud_k = pud_offset(pgd_k, addr);
+		p4d = p4d_offset(pgd, addr);
+		p4d_k = p4d_offset(pgd_k, addr);
+		if (!p4d_present(*p4d_k))
+			goto no_context;
+
+		pud = pud_offset(p4d, addr);
+		pud_k = pud_offset(p4d_k, addr);
 		if (!pud_present(*pud_k))
 			goto no_context;
 

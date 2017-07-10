@@ -1,78 +1,26 @@
-# Overview
-This is a complete guide to getting our PFA testing environment up and running. This guide assumes a number of environment variables:
+# Linux/RISC-V
 
-* $TOP - a folder containing all downloaded repositories. e.g., $TOP/linux-4.6.2 should point to your linux source directory.
-* $RISCV - a folder containing the local install of the RISC-V toolchain (I don't recommend installing them to your root directory, just in case). See riscv-tools instructions for how this gets setup.
+This is a port of Linux kernel for the [RISC-V](http://riscv.org/)
+instruction set architecture.
+Development is currently based on the
+[4.6 longterm branch](https://git.kernel.org/cgit/linux/kernel/git/stable/linux-stable.git/log/?h=linux-4.6.y).
 
-# riscv-tools
-We'll need to install the riscv toolchain in order to cross-compile for linux. Get the source from [here](https://github.com/riscv/riscv-tools). For our qemu to work, we'll need to checkout an older commit:
 
-        $ git checkout ad9ebb8557e32241bfca047f2bc628a2bc1c18cb
+## Checking Out
+The kernel history is quite large, you may want to limit the branches and commit
+history that you checkout:
 
-There are a lot of instructions in the README, many of them are wrong. Instead, I've replicated the relevant instructions here:
+        $ git clone --depth 50 --single-branch https://github.com/riscv/riscv-linux.git
 
-        $ git submodule update --init --recursive
-        $ export RISCV=/path/to/install/riscv/toolchain
-        $ ./build.sh
+## Obtaining the Toolchain
+You will need the [RISC-V tools](https://github.com/riscv/riscv-tools) in order to build linux.
+In addition to following the RISC-V tools README, you must build the linux version of the
+gnu toolchain:
 
-Enter the `riscv-gnu-toolchain` directory and run the configure script
-to generate the Makefile.
+    $ cd path/to/riscv-gnu-toolchain
+    $ make linux
 
-        $ ./configure --prefix=$RISCV
-        $ make linux
-
-Note: The default for the build.sh script is to install riscv64-unknown-elf-gcc which doesn't work for building the kernel (and maybe other stuff?). Anyway, you need to always use the riscv64-unknown-linux-gnu- prefix instead (which is built with the "make linux" command).
-
-# riscv-qemu
-For this project, we are using a modified qemu from [here](https://github.com/WabashOS/riscv-qemu-pk). The instructions on that page mostly seem to work, although you may need to disable werror when configuring (add --disable-werror to the ./configure command line).
-
-# busybox
-We use busybox as our linux userspace. It basically wraps up all the necessary components into a nice, single binary. Get it [here](http://www.busybox.net). We're using busybox 1.23.1, but the version probably isn't very important.
-
-First, obtain and untar the source:
-
-	$ curl -L https://busybox.net/downloads/busybox-1.23.1.tar.bz2 | tar -xj
-
-I'm currently using the "defconfig":
-
-	$ cd busybox-1.23.1
-	$ make defconfig
-
-We will need to change the cross-compiler, set the build to
-"static" (if desired, you can make it dynamic, but you'll have to copy some
-libraries later). Here are the recommended config changes (make menuconfig):
-
-* "compile static" under general->build options
-* set cross-compiler prefix (under general->build options) to "riscv64-unknown-linux-gnu-"
-* remove inetd from networking tools (if you run into compiler errors like I did)
-* Disable job control for `ash` under the `ash` applet.
-
-Once you've finished, make BusyBox. You don't need to specify
-`$ARCH`, because we've passed the name of the cross-compiler prefix.
-
-	$ make
-
-# Linux
-This repo contains just the risc-v specific parts of the linux kernel and is intended to be overlayed on top of the orginal sources. Note the PFA branch checks out the right commit to play nice with risc-v qemu and risc-v tools. various commits break various things so it's good to be careful here.
-
-## Obtaining kernel sources
-
-Overlay the `riscv` architecture-specific subtree onto an upstream release:
-
-        $ curl -L https://cdn.kernel.org/pub/linux/kernel/v4.x/linux-4.6.2.tar.xz | tar -xJ
-        $ cd linux-4.6.2
-        $ git init
-        $ git remote add -t pfa origin git@github.com:WabashOS/riscv-linux.git
-        $ git fetch
-        $ git checkout -f -t origin/pfa
-
-Note that the `-t <branch>` option minimizes the history fetched.
-To add another branch:
-
-        $ git remote set-branches --add origin <branch>
-        $ git fetch
-
-## Compiling
+## Building the kernel image
 
 1. Create kernel configuration based on architecture defaults:
 
@@ -82,47 +30,71 @@ To add another branch:
 
         $ make ARCH=riscv menuconfig
 
-1. PFA-specific config (via make ARCH=riscv menuconfig)
-  
-    * sysfs in "filesystems->pseudo filesystems" (CONFIG_SYSFS)
-    * "Initial RAM Filesystem" in "general->" (CONFIG_BLK_DEV_INITRD)
-    * "Initial RAM Filesystem Path" = "arch/riscv/initramfs.txt" in "general->" (CONFIG_INITRAMFS_SOURCE)
-    * frontswap in "kernel->" (CONFIG_FRONTSWAP)
-
-1. initramfs
-Note that the comitted arch/riscv/initramfs.txt is tuned for my system, be sure to edit it to point to your install of busybox.
-
 1. Build the uncompressed kernel image:
 
-        $ make ARCH=riscv vmlinux
+        $ make -j4 ARCH=riscv vmlinux
 
-1. Update Kernel Headers
-We've added at least one syscall to linux for testing. We need to inform the toolchain about it. Do the following:
+1. Link the kernel to the Berkeley Boot Loader (bbl)
+
+        $ cd /path/to/risv-tools/riscv-pk/build
+        $ ../configure --with-payload=/path/to/riscv-linux/vmlinux --host=riscv64-unknown-linux-gnu
+        $ make bbl
+        
+1. Boot the kernel in the functional simulator.
+
+        $ spike bbl
+
+## Booting from Initramfs
+Block devices are not currently supported. If you want a useful linux, you will need to configure it to boot from an initramfs. 
+
+1. Enable initramfs in the linux config:
+
+        "General setup -> Initial RAM Filesystem..." (CONFIG_BLK_DEV_INITRD=y)
+
+1. Use a text file to specify contents of the initramfs:
+
+        "General setup -> Initramfs source files = initramfs.txt" (CONFIG_INITRAMFS_SRC=initramfs.txt)
+
+The file riscv-linux/initramfs.txt should contain a list of files to include. Here is a basic one to start with:
+        
+        dir /dev 755 0 0
+        nod /dev/console 644 0 0 c 5 1
+        nod /dev/null 644 0 0 c 1 3
+        dir /proc 755 0 0
+        slink /init /bin/busybox 755 0 0
+        dir /bin 755 0 0
+        file /bin/busybox /path/to/busybox 755 0 0
+        dir /sbin 755 0 0
+        dir /usr 755 0 0
+        dir /usr/bin 755 0 0
+        dir /usr/sbin 755 0 0
+        dir /etc 755 0 0
+        file /etc/inittab inittab 644 0 0
+        dir /lib 755 0 0
+
+Be sure to change "/path/to/busybox..." to point to your busybox binary
+(the RISC-V Tools README has instructions on
+[building busybox](https://github.com/riscv/riscv-tools#building-busybox)).
+You will also need a riscv-linux/inittab file:
+
+        ::sysinit:/bin/busybox --install
+        ::sysinit:/bin/mount -t devtmpfs devtmpfs /dev
+        ::sysinit:/bin/mount -t proc proc /proc
+        /dev/console::sysinit:-/bin/ash
+
+Now when you build and run linux, it should boot from the internal initramfs.
+
+## Exporting kernel headers
+
+The `riscv-gnu-toolchain` repository includes a copy of the kernel header files.
+If the userspace API has changed, export the updated headers to the
+`riscv-gnu-toolchain` source directory:
 
     $ make ARCH=riscv headers_check
-    $ make ARCH=riscv INSTALL_HDR_PATH=$TOP/riscv-tools/riscv-gnu-toolchain/linux-headers headers_install
+    $ make ARCH=riscv INSTALL_HDR_PATH=path/to/riscv-gnu-toolchain/linux-headers headers_install
 
 Rebuild `riscv64-unknown-linux-gnu-gcc` with the `linux` target:
 
     $ cd path/to/riscv-gnu-toolchain
     $ make linux
 
-# BBL
-The berkeley boot loader ties everything together and creates a bootable image that qemu can run. Configure and build it thusly (The riscv-pk 'build' directory might need to be created first):
-
-        $ cd $TOP/riscv-tools/riscv-pk/build/
-        $ ../configure --prefix=$RISCV --with-payload=$TOP/linux-4.6.2/vmlinux --host=riscv64-unknown-linux-gnu
-        $ cd build/
-        $ make bbl
-
-# Tying it all together
-The final image can now be run under qemu:
-
-        $ qemu-system-riscv64 -kernel $TOP/riscv-tools/riscv-pk/build/bbl -nographic
-        
-To rebuild, you have to repeat all the steps, starting from the oldest thing you changed:
-1. build busybox
-1. build linux
-1. build bbl
-
-This means that if you change linux, you need to recompile it, then recompile bbl before you see the full changes. I should probably write a script for this or something...

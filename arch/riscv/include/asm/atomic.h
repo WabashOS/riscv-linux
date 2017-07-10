@@ -1,7 +1,17 @@
+/*
+ * Copyright (C) 2007 Red Hat, Inc. All Rights Reserved.
+ * Copyright (C) 2012 Regents of the University of California
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public Licence
+ * as published by the Free Software Foundation; either version
+ * 2 of the Licence, or (at your option) any later version.
+ */
+
 #ifndef _ASM_RISCV_ATOMIC_H
 #define _ASM_RISCV_ATOMIC_H
 
-#ifdef CONFIG_RV_ATOMIC
+#ifdef CONFIG_ISA_A
 
 #include <asm/cmpxchg.h>
 #include <asm/barrier.h>
@@ -46,6 +56,18 @@ static inline void atomic_add(int i, atomic_t *v)
 		: "r" (i));
 }
 
+#define atomic_fetch_add atomic_fetch_add
+static inline int atomic_fetch_add(unsigned int mask, atomic_t *v)
+{
+	int out;
+
+	__asm__ __volatile__ (
+		"amoadd.w %2, %1, %0"
+		: "+A" (v->counter), "=r" (out)
+		: "r" (mask));
+	return out;
+}
+
 /**
  * atomic_sub - subtract integer from atomic variable
  * @i: integer value to subtract
@@ -58,6 +80,18 @@ static inline void atomic_sub(int i, atomic_t *v)
 	atomic_add(-i, v);
 }
 
+#define atomic_fetch_sub atomic_fetch_sub
+static inline int atomic_fetch_sub(unsigned int mask, atomic_t *v)
+{
+	int out;
+
+	__asm__ __volatile__ (
+		"amosub.w %2, %1, %0"
+		: "+A" (v->counter), "=r" (out)
+		: "r" (mask));
+	return out;
+}
+
 /**
  * atomic_add_return - add integer to atomic variable
  * @i: integer value to add
@@ -68,6 +102,7 @@ static inline void atomic_sub(int i, atomic_t *v)
 static inline int atomic_add_return(int i, atomic_t *v)
 {
 	register int c;
+
 	__asm__ __volatile__ (
 		"amoadd.w %0, %2, %1"
 		: "=r" (c), "+A" (v->counter)
@@ -163,7 +198,7 @@ static inline int atomic_dec_and_test(atomic_t *v)
  * atomic_add_negative - add and test if negative
  * @i: integer value to add
  * @v: pointer of type atomic_t
- * 
+ *
  * Atomically adds @i to @v and returns true
  * if the result is negative, or false when
  * result is greater than or equal to zero.
@@ -177,6 +212,7 @@ static inline int atomic_add_negative(int i, atomic_t *v)
 static inline int atomic_xchg(atomic_t *v, int n)
 {
 	register int c;
+
 	__asm__ __volatile__ (
 		"amoswap.w %0, %2, %1"
 		: "=r" (c), "+A" (v->counter)
@@ -201,6 +237,7 @@ static inline int atomic_cmpxchg(atomic_t *v, int o, int n)
 static inline int __atomic_add_unless(atomic_t *v, int a, int u)
 {
 	register int prev, rc;
+
 	__asm__ __volatile__ (
 	"0:"
 		"lr.w %0, %2\n"
@@ -229,6 +266,18 @@ static inline void atomic_and(unsigned int mask, atomic_t *v)
 		: "r" (mask));
 }
 
+#define atomic_fetch_and atomic_fetch_and
+static inline int atomic_fetch_and(unsigned int mask, atomic_t *v)
+{
+	int out;
+
+	__asm__ __volatile__ (
+		"amoand.w %2, %1, %0"
+		: "+A" (v->counter), "=r" (out)
+		: "r" (mask));
+	return out;
+}
+
 /**
  * atomic_or - Atomically set bits in atomic variable
  * @mask: Mask of the bits to be set
@@ -242,6 +291,18 @@ static inline void atomic_or(unsigned int mask, atomic_t *v)
 		"amoor.w zero, %1, %0"
 		: "+A" (v->counter)
 		: "r" (mask));
+}
+
+#define atomic_fetch_or atomic_fetch_or
+static inline int atomic_fetch_or(unsigned int mask, atomic_t *v)
+{
+	int out;
+
+	__asm__ __volatile__ (
+		"amoor.w %2, %1, %0"
+		: "+A" (v->counter), "=r" (out)
+		: "r" (mask));
+	return out;
 }
 
 /**
@@ -259,17 +320,29 @@ static inline void atomic_xor(unsigned int mask, atomic_t *v)
 		: "r" (mask));
 }
 
+#define atomic_fetch_xor atomic_fetch_xor
+static inline int atomic_fetch_xor(unsigned int mask, atomic_t *v)
+{
+	int out;
+
+	__asm__ __volatile__ (
+		"amoxor.w %2, %1, %0"
+		: "+A" (v->counter), "=r" (out)
+		: "r" (mask));
+	return out;
+}
+
 /* Assume that atomic operations are already serializing */
 #define smp_mb__before_atomic_dec()	barrier()
 #define smp_mb__after_atomic_dec()	barrier()
 #define smp_mb__before_atomic_inc()	barrier()
 #define smp_mb__after_atomic_inc()	barrier()
 
-#else /* !CONFIG_RV_ATOMIC */
+#else /* !CONFIG_ISA_A */
 
 #include <asm-generic/atomic.h>
 
-#endif /* CONFIG_RV_ATOMIC */
+#endif /* CONFIG_ISA_A */
 
 #include <asm/atomic64.h>
 

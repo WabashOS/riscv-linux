@@ -1,9 +1,29 @@
+/*
+ * Copyright 2010 Tilera Corporation. All Rights Reserved.
+ * Copyright 2015 Regents of the University of California
+ * Copyright 2017 SiFive
+ *
+ *   This program is free software; you can redistribute it and/or
+ *   modify it under the terms of the GNU General Public License
+ *   as published by the Free Software Foundation, version 2.
+ *
+ *   This program is distributed in the hope that it will be useful, but
+ *   WITHOUT ANY WARRANTY; without even the implied warranty of
+ *   MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, GOOD TITLE or
+ *   NON INFRINGEMENT.  See the GNU General Public License for
+ *   more details.
+ *
+ * Copied from arch/tile/kernel/ptrace.c
+ */
+
 #include <asm/ptrace.h>
 #include <asm/syscall.h>
 #include <asm/thread_info.h>
 #include <linux/ptrace.h>
 #include <linux/elf.h>
 #include <linux/regset.h>
+#include <linux/sched.h>
+#include <linux/sched/task_stack.h>
 #include <linux/tracehook.h>
 #include <trace/events/syscalls.h>
 

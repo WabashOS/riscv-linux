@@ -1,3 +1,17 @@
+/*
+ * Copyright (C) 2015 Regents of the University of California
+ *
+ *   This program is free software; you can redistribute it and/or
+ *   modify it under the terms of the GNU General Public License
+ *   as published by the Free Software Foundation, version 2.
+ *
+ *   This program is distributed in the hope that it will be useful, but
+ *   WITHOUT ANY WARRANTY; without even the implied warranty of
+ *   MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, GOOD TITLE or
+ *   NON INFRINGEMENT.  See the GNU General Public License for
+ *   more details.
+ */
+
 #ifndef _ASM_RISCV_ASM_H
 #define _ASM_RISCV_ASM_H
 
@@ -7,10 +21,12 @@
 #define __ASM_STR(x)	#x
 #endif
 
-#ifdef __riscv64
-#define __REG_SEL(a,b)	__ASM_STR(a)
+#if __riscv_xlen == 64
+#define __REG_SEL(a, b)	__ASM_STR(a)
+#elif __riscv_xlen == 32
+#define __REG_SEL(a, b)	__ASM_STR(b)
 #else
-#define __REG_SEL(a,b)	__ASM_STR(b)
+#error "Unexpected __riscv_xlen"
 #endif
 
 #define REG_L		__REG_SEL(ld, lw)
@@ -18,12 +34,12 @@
 #define SZREG		__REG_SEL(8, 4)
 #define LGREG		__REG_SEL(3, 2)
 
-#if (_RISCV_SZPTR == 64)
-#define __PTR_SEL(a,b)	__ASM_STR(a)
-#elif (_RISCV_SZPTR == 32)
-#define __PTR_SEL(a,b)	__ASM_STR(b)
+#if __SIZEOF_POINTER__ == 8
+#define __PTR_SEL(a, b)	__ASM_STR(a)
+#elif __SIZEOF_POINTER__ == 4
+#define __PTR_SEL(a, b)	__ASM_STR(b)
 #else
-#error "Unexpected _RISCV_SZPTR"
+#error "Unexpected __SIZEOF_POINTER__"
 #endif
 
 #define PTR		__PTR_SEL(.dword, .word)

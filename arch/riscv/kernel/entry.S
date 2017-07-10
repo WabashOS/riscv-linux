@@ -1,3 +1,18 @@
+/*
+ * Copyright (C) 2012 Regents of the University of California
+ * Copyright (C) 2017 SiFive
+ *
+ *   This program is free software; you can redistribute it and/or
+ *   modify it under the terms of the GNU General Public License
+ *   as published by the Free Software Foundation, version 2.
+ *
+ *   This program is distributed in the hope that it will be useful, but
+ *   WITHOUT ANY WARRANTY; without even the implied warranty of
+ *   MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, GOOD TITLE or
+ *   NON INFRINGEMENT.  See the GNU General Public License for
+ *   more details.
+ */
+
 #include <linux/init.h>
 #include <linux/linkage.h>
 
@@ -120,11 +135,8 @@ ENTRY(handle_exception)
 	/* Compute address of current thread_info */
 	li tp, ~(THREAD_SIZE-1)
 	and tp, tp, sp
-	/* Set current pointer */
-	REG_L tp, TI_TASK(tp)
 
-1:	auipc gp, %pcrel_hi(_gp)
-	addi gp, gp, %pcrel_lo(1b)
+	la gp, __global_pointer$
 
 	la ra, ret_from_exception
 	/* MSB of cause differentiates between
@@ -162,8 +174,7 @@ handle_syscall:
 	/* System calls run with interrupts enabled */
 	csrs sstatus, SR_IE
 	/* Trace syscalls, but only if requested by the user. */
-	REG_L t0, TASK_THREAD_INFO(tp)
-	REG_L t0, TI_FLAGS(t0)
+	REG_L t0, TI_FLAGS(tp)
 	andi t0, t0, _TIF_SYSCALL_TRACE
 	bnez t0, handle_syscall_trace_enter
 check_syscall_nr:
@@ -183,8 +194,7 @@ ret_from_syscall:
 	/* Set user a0 to kernel a0 */
 	REG_S a0, PT_A0(sp)
 	/* Trace syscalls, but only if requested by the user. */
-	REG_L t0, TASK_THREAD_INFO(tp)
-	REG_L t0, TI_FLAGS(t0)
+	REG_L t0, TI_FLAGS(tp)
 	andi t0, t0, _TIF_SYSCALL_TRACE
 	bnez t0, handle_syscall_trace_exit
 
@@ -196,8 +206,7 @@ ret_from_exception:
 
 resume_userspace:
 	/* Interrupts must be disabled here so flags are checked atomically */
-	REG_L s0, TASK_THREAD_INFO(tp)
-	REG_L s0, TI_FLAGS(s0) /* current_thread_info->flags */
+	REG_L s0, TI_FLAGS(tp) /* current_thread_info->flags */
 	andi s1, s0, _TIF_WORK_MASK
 	bnez s1, work_pending
 
@@ -259,7 +268,7 @@ ENDPROC(ret_from_kernel_thread)
 /*
  * Integer register context switch
  * The callee-saved registers must be saved and restored.
- * 
+ *
  *   a0: previous task_struct (must be preserved across the switch)
  *   a1: next task_struct
  */
@@ -294,7 +303,7 @@ ENTRY(__switch_to)
 	REG_L s9,  THREAD_S9(a1)
 	REG_L s10, THREAD_S10(a1)
 	REG_L s11, THREAD_S11(a1)
-	mv tp, a1 /* Next current pointer */
+	REG_L tp, TASK_THREAD_INFO(a1)
 	ret
 ENDPROC(__switch_to)
 
@@ -385,15 +394,21 @@ ENDPROC(__fstate_restore)
 	/* Exception vector table */
 ENTRY(excp_vect_table)
 	PTR do_trap_insn_misaligned
-	PTR do_page_fault
+	PTR do_trap_unknown /* instruction access exception */
 	PTR do_trap_insn_illegal
-	PTR do_trap_unknown
-	PTR do_trap_unknown
-	PTR do_page_fault
-	PTR do_trap_amo_misaligned
-	PTR do_page_fault
-	PTR 0 /* handle_syscall */
 	PTR do_trap_break
+	PTR do_trap_unknown
+	PTR do_trap_unknown /* load access exception */
+	PTR do_trap_amo_misaligned
+	PTR do_trap_unknown /* store access exception */
+	PTR do_trap_unknown /* handle_syscall */
+	PTR do_trap_unknown
+	PTR do_trap_unknown
+	PTR do_trap_unknown
+	PTR do_page_fault   /* instruction page fault */
+	PTR do_page_fault   /* load page fault */
+	PTR do_trap_unknown
+	PTR do_page_fault   /* store page fault */
 excp_vect_table_end:
 END(excp_vect_table)
 

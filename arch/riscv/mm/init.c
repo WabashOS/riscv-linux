@@ -1,3 +1,17 @@
+/*
+ * Copyright (C) 2012 Regents of the University of California
+ *
+ *   This program is free software; you can redistribute it and/or
+ *   modify it under the terms of the GNU General Public License
+ *   as published by the Free Software Foundation, version 2.
+ *
+ *   This program is distributed in the hope that it will be useful, but
+ *   WITHOUT ANY WARRANTY; without even the implied warranty of
+ *   MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, GOOD TITLE or
+ *   NON INFRINGEMENT.  See the GNU General Public License for
+ *   more details.
+ */
+
 #include <linux/init.h>
 #include <linux/mm.h>
 #include <linux/bootmem.h>
@@ -10,39 +24,13 @@
 #include <asm/pgtable.h>
 #include <asm/io.h>
 
-#ifdef CONFIG_NUMA
 static void __init zone_sizes_init(void)
 {
 	unsigned long zones_size[MAX_NR_ZONES];
-	int nid;
-
 	memset(zones_size, 0, sizeof(zones_size));
-
-	for_each_online_node(nid) {
-		pg_data_t *pgdat;
-		unsigned long start_pfn, end_pfn;
-
-		pgdat = NODE_DATA(nid);
-		start_pfn = pgdat->bdata->node_min_pfn;
-		end_pfn = pgdat->bdata->node_low_pfn;
-		memblock_add_node(start_pfn,
-			PFN_PHYS(end_pfn - start_pfn), nid);
-	}
-
-	zones_size[ZONE_NORMAL] = pfn_base + max_mapnr;
-	free_area_init_nodes(zones_size);
+	zones_size[ZONE_NORMAL] = max_mapnr;
+	free_area_init_node(0, zones_size, pfn_base, NULL);
 }
-#else
-static void __init zone_sizes_init(void)
-{
-	unsigned long zones_size[MAX_NR_ZONES];
-
-	memset(zones_size, 0, sizeof(zones_size));
-	memblock_add_node(PFN_PHYS(pfn_base), PFN_PHYS(max_mapnr), 0);
-	zones_size[ZONE_NORMAL] = pfn_base + max_mapnr;
-	free_area_init_nodes(zones_size);
-}
-#endif /* CONFIG_NUMA */
 
 void setup_zero_page(void)
 {

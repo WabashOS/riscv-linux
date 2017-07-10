@@ -1,3 +1,17 @@
+/*
+ * Copyright (C) 2012 Regents of the University of California
+ *
+ *   This program is free software; you can redistribute it and/or
+ *   modify it under the terms of the GNU General Public License
+ *   as published by the Free Software Foundation, version 2.
+ *
+ *   This program is distributed in the hope that it will be useful, but
+ *   WITHOUT ANY WARRANTY; without even the implied warranty of
+ *   MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, GOOD TITLE or
+ *   NON INFRINGEMENT.  See the GNU General Public License for
+ *   more details.
+ */
+
 #ifndef _ASM_RISCV_PROCESSOR_H
 #define _ASM_RISCV_PROCESSOR_H
 
@@ -14,6 +28,7 @@
 #ifdef __KERNEL__
 #define STACK_TOP		TASK_SIZE
 #define STACK_TOP_MAX		STACK_TOP
+#define STACK_ALIGN		16
 #endif /* __KERNEL__ */
 
 #ifndef __ASSEMBLY__
@@ -33,7 +48,7 @@ struct thread_struct {
 	unsigned long ra;
 	unsigned long sp;	/* Kernel mode stack */
 	unsigned long s[12];	/* s[0]: frame pointer */
-	struct user_fpregs_struct fstate;
+	struct __riscv_d_ext_state fstate;
 };
 
 #define INIT_THREAD {					\
@@ -45,8 +60,9 @@ struct thread_struct {
 #define thread_saved_sp(t)	((t)->thread.sp)
 #define thread_saved_fp(t)	((t)->thread.s[0])
 
-#define task_pt_regs(tsk) \
-	((struct pt_regs *)(task_stack_page(tsk) + THREAD_SIZE) - 1)
+#define task_pt_regs(tsk)						\
+	((struct pt_regs *)(task_stack_page(tsk) + THREAD_SIZE		\
+			    - ALIGN(sizeof(struct pt_regs), STACK_ALIGN)))
 
 #define KSTK_EIP(tsk)		(task_pt_regs(tsk)->sepc)
 #define KSTK_ESP(tsk)		(task_pt_regs(tsk)->sp)
@@ -61,19 +77,16 @@ static inline void release_thread(struct task_struct *dead_task)
 {
 }
 
-/* Free current thread data structures, etc. */
-static inline void exit_thread(void)
-{
-}
-
 extern unsigned long get_wchan(struct task_struct *p);
 
 
 static inline void cpu_relax(void)
 {
+#ifdef __riscv_muldiv
 	int dummy;
 	/* In lieu of a halt instruction, induce a long-latency stall. */
 	__asm__ __volatile__ ("div %0, %0, zero" : "=r" (dummy));
+#endif
 	barrier();
 }
 
@@ -81,6 +94,9 @@ static inline void wait_for_interrupt(void)
 {
 	__asm__ __volatile__ ("wfi");
 }
+
+struct device_node;
+extern int riscv_of_processor_hart(struct device_node *node);
 
 #endif /* __ASSEMBLY__ */
 

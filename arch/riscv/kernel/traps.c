@@ -1,11 +1,28 @@
+/*
+ * Copyright (C) 2012 Regents of the University of California
+ *
+ *   This program is free software; you can redistribute it and/or
+ *   modify it under the terms of the GNU General Public License
+ *   as published by the Free Software Foundation, version 2.
+ *
+ *   This program is distributed in the hope that it will be useful, but
+ *   WITHOUT ANY WARRANTY; without even the implied warranty of
+ *   MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, GOOD TITLE or
+ *   NON INFRINGEMENT.  See the GNU General Public License for
+ *   more details.
+ */
+
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/sched.h>
+#include <linux/sched/debug.h>
+#include <linux/sched/signal.h>
 #include <linux/signal.h>
 #include <linux/kdebug.h>
 #include <linux/uaccess.h>
 #include <linux/mm.h>
 #include <linux/module.h>
+#include <linux/irq.h>
 
 #include <asm/processor.h>
 #include <asm/ptrace.h>
@@ -138,9 +155,13 @@ int is_valid_bugaddr(unsigned long pc)
 
 void __init trap_init(void)
 {
+	int hart = smp_processor_id();
+
 	/* Set sup0 scratch register to 0, indicating to exception vector
 	   that we are presently executing in the kernel */
 	csr_write(sscratch, 0);
 	/* Set the exception vector address */
 	csr_write(stvec, &handle_exception);
+	/* Enable software interrupts and setup initial mask */
+	csr_write(sie, SIE_SSIE | atomic_long_read(&per_cpu(riscv_early_sie, hart)));
 }

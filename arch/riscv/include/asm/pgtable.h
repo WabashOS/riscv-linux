@@ -1,3 +1,17 @@
+/*
+ * Copyright (C) 2012 Regents of the University of California
+ *
+ *   This program is free software; you can redistribute it and/or
+ *   modify it under the terms of the GNU General Public License
+ *   as published by the Free Software Foundation, version 2.
+ *
+ *   This program is distributed in the hope that it will be useful, but
+ *   WITHOUT ANY WARRANTY; without even the implied warranty of
+ *   MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, GOOD TITLE or
+ *   NON INFRINGEMENT.  See the GNU General Public License for
+ *   more details.
+ */
+
 #ifndef _ASM_RISCV_PGTABLE_H
 #define _ASM_RISCV_PGTABLE_H
 
@@ -12,6 +26,7 @@
 /* Page Upper Directory not used in RISC-V */
 #include <asm-generic/pgtable-nopud.h>
 #include <asm/page.h>
+#include <asm/tlbflush.h>
 #include <linux/mm_types.h>
 
 #ifdef CONFIG_64BIT
@@ -46,10 +61,16 @@
 #define PAGE_SHARED		PAGE_WRITE
 #define PAGE_SHARED_EXEC	PAGE_WRITE_EXEC
 
-#define PAGE_KERNEL		__pgprot(_PAGE_READ | _PAGE_WRITE |	\
-					 _PAGE_PRESENT | _PAGE_ACCESSED)
+#define _PAGE_KERNEL		_PAGE_READ \
+				| _PAGE_WRITE \
+				| _PAGE_PRESENT \
+				| _PAGE_ACCESSED \
+				| _PAGE_DIRTY
 
-#define swapper_pg_dir NULL
+#define PAGE_KERNEL		__pgprot(_PAGE_KERNEL)
+#define PAGE_KERNEL_EXEC	__pgprot(_PAGE_KERNEL | _PAGE_EXEC)
+
+extern pgd_t swapper_pg_dir[];
 
 /* MAP_PRIVATE permissions: xwr (copy-on-write) */
 #define __P000	PAGE_NONE
@@ -104,6 +125,11 @@ static inline void pmd_clear(pmd_t *pmdp)
 }
 
 
+static inline pgd_t pfn_pgd(unsigned long pfn, pgprot_t prot)
+{
+	return __pgd((pfn << _PAGE_PFN_SHIFT) | pgprot_val(prot));
+}
+
 #define pgd_index(addr) (((addr) >> PGDIR_SHIFT) & (PTRS_PER_PGD - 1))
 
 /* Locate an entry in the page global directory */
@@ -145,7 +171,7 @@ static inline pte_t mk_pte(struct page *page, pgprot_t prot)
 	return pfn_pte(page_to_pfn(page), prot);
 }
 
-#define pte_index(addr) (((addr) >> PAGE_SHIFT) & (PTRS_PER_PTE - 1)) 
+#define pte_index(addr) (((addr) >> PAGE_SHIFT) & (PTRS_PER_PTE - 1))
 
 static inline pte_t *pte_offset_kernel(pmd_t *pmd, unsigned long addr)
 {
@@ -255,12 +281,12 @@ static inline pte_t pte_mkclean(pte_t pte)
 
 static inline pte_t pte_mkyoung(pte_t pte)
 {
-	return __pte(pte_val(pte) & ~(_PAGE_ACCESSED));
+	return __pte(pte_val(pte) | _PAGE_ACCESSED);
 }
 
 static inline pte_t pte_mkold(pte_t pte)
 {
-	return __pte(pte_val(pte) | _PAGE_ACCESSED);
+	return __pte(pte_val(pte) & ~(_PAGE_ACCESSED));
 }
 
 static inline pte_t pte_mkspecial(pte_t pte)
@@ -282,6 +308,76 @@ static inline pte_t pte_modify(pte_t pte, pgprot_t newprot)
 static inline void update_mmu_cache(struct vm_area_struct *vma,
 	unsigned long address, pte_t *ptep)
 {
+	/* The kernel assumes that TLBs don't cache invalid entries, but
+	 * in RISC-V, SFENCE.VMA specifies an ordering constraint, not a
+	 * cache flush; it is necessary even after writing invalid entries.
+	 * Relying on flush_tlb_fix_spurious_fault would suffice, but
+	 * the extra traps reduce performance.  So, eagerly SFENCE.VMA. */
+	local_flush_tlb_page(address);
+}
+
+#define __HAVE_ARCH_PTE_SAME
+static inline int pte_same(pte_t pte_a, pte_t pte_b)
+{
+	return pte_val(pte_a) == pte_val(pte_b);
+}
+
+#define __HAVE_ARCH_PTEP_SET_ACCESS_FLAGS
+static inline int ptep_set_access_flags(struct vm_area_struct *vma,
+					unsigned long address, pte_t *ptep,
+					pte_t entry, int dirty)
+{
+	if (!pte_same(*ptep, entry))
+		set_pte_at(vma->vm_mm, address, ptep, entry);
+	/* update_mmu_cache will unconditionally execute, handling both
+	 * the case that the PTE changed and the spurious fault case. */
+	return true;
+}
+
+#define __HAVE_ARCH_PTEP_GET_AND_CLEAR
+static inline pte_t ptep_get_and_clear(struct mm_struct *mm,
+				       unsigned long address, pte_t *ptep)
+{
+	return __pte(atomic_long_xchg((atomic_long_t *)ptep, 0));
+}
+
+#define __HAVE_ARCH_PTEP_TEST_AND_CLEAR_YOUNG
+static inline int ptep_test_and_clear_young(struct vm_area_struct *vma,
+					    unsigned long address,
+					    pte_t *ptep)
+{
+	if (!pte_young(*ptep))
+		return 0;
+	return test_and_clear_bit(_PAGE_ACCESSED_OFFSET, &pte_val(*ptep));
+}
+
+#define __HAVE_ARCH_PTEP_SET_WRPROTECT
+static inline void ptep_set_wrprotect(struct mm_struct *mm,
+				      unsigned long address, pte_t *ptep)
+{
+	atomic_long_and(~(unsigned long)_PAGE_WRITE, (atomic_long_t *)ptep);
+}
+
+#define __HAVE_ARCH_PTEP_CLEAR_YOUNG_FLUSH
+static inline int ptep_clear_flush_young(struct vm_area_struct *vma,
+					 unsigned long address, pte_t *ptep)
+{
+	/*
+	 * This comment is borrowed from x86, but applies equally to RISC-V:
+	 *
+	 * Clearing the accessed bit without a TLB flush
+	 * doesn't cause data corruption. [ It could cause incorrect
+	 * page aging and the (mistaken) reclaim of hot pages, but the
+	 * chance of that should be relatively low. ]
+	 *
+	 * So as a performance optimization don't flush the TLB when
+	 * clearing the accessed bit, it will eventually be flushed by
+	 * a context switch or a VM operation anyway. [ In the rare
+	 * event of it not getting flushed for a long time the delay
+	 * shouldn't really matter because there's no real memory
+	 * pressure for swapout to react to. ]
+	 */
+	return ptep_test_and_clear_young(vma, address, ptep);
 }
 
 /*
@@ -322,12 +418,13 @@ static inline void pgtable_cache_init(void)
 
 #endif /* CONFIG_MMU */
 
-#define VMALLOC_SIZE     _AC(0x8000000,UL)
+#define VMALLOC_SIZE     (KERN_VIRT_SIZE >> 1)
 #define VMALLOC_END      (PAGE_OFFSET - 1)
 #define VMALLOC_START    (PAGE_OFFSET - VMALLOC_SIZE)
 
 /* Task size is 0x40000000000 for RV64 or 0xb800000 for RV32.
-   Note that PGDIR_SIZE must evenly divide TASK_SIZE. */
+ * Note that PGDIR_SIZE must evenly divide TASK_SIZE.
+ */
 #ifdef CONFIG_64BIT
 #define TASK_SIZE (PGDIR_SIZE * PTRS_PER_PGD / 2)
 #else

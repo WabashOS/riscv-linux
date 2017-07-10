@@ -1,22 +1,33 @@
+/*
+ * Copyright (C) 2009 Chen Liqin <liqin.chen@sunplusct.com>
+ * Copyright (C) 2012 Regents of the University of California
+ *
+ *   This program is free software; you can redistribute it and/or
+ *   modify it under the terms of the GNU General Public License
+ *   as published by the Free Software Foundation, version 2.
+ *
+ *   This program is distributed in the hope that it will be useful, but
+ *   WITHOUT ANY WARRANTY; without even the implied warranty of
+ *   MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, GOOD TITLE or
+ *   NON INFRINGEMENT.  See the GNU General Public License for
+ *   more details.
+ */
+
 #ifndef _ASM_RISCV_TLBFLUSH_H
 #define _ASM_RISCV_TLBFLUSH_H
 
 #ifdef CONFIG_MMU
 
-#include <linux/mm.h>
-#include <linux/bug.h>
-#include <asm/csr.h>
-
 /* Flush entire local TLB */
 static inline void local_flush_tlb_all(void)
 {
-	__asm__ __volatile__ ("sfence.vm");
+	__asm__ __volatile__ ("sfence.vma" : : : "memory");
 }
 
 /* Flush one page from local TLB */
 static inline void local_flush_tlb_page(unsigned long addr)
 {
-	__asm__ __volatile__ ("sfence.vm %0" : : "r" (addr));
+	__asm__ __volatile__ ("sfence.vma %0" : : "r" (addr) : "memory");
 }
 
 #ifndef CONFIG_SMP
@@ -29,10 +40,10 @@ static inline void local_flush_tlb_page(unsigned long addr)
 
 #include <asm/sbi.h>
 
-#define flush_tlb_all() sbi_remote_sfence_vm(0, 0)
-#define flush_tlb_page(vma, addr) flush_tlb_range(vma, (addr), (addr) + 1)
+#define flush_tlb_all() sbi_remote_sfence_vma(0, 0, -1)
+#define flush_tlb_page(vma, addr) flush_tlb_range(vma, addr, 0)
 #define flush_tlb_range(vma, start, end) \
-	sbi_remote_sfence_vm_range(0, 0, (start), (end) - (start))
+	sbi_remote_sfence_vma(0, start, (end) - (start))
 
 #endif /* CONFIG_SMP */
 
