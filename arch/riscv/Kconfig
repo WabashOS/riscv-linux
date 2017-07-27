@@ -145,6 +145,18 @@ config SBI_CONSOLE
 	select TTY
 	default y
 
+config SBI_DISK
+	tristate "SBI disk support"
+	default y
+
+config GENERIC_BLKDEV
+        tristate "Generic Block Device"
+        default y
+
+config ICENET
+        tristate "IceNet Ethernet NIC"
+        default y
+
 config ISA_C
 	bool "Emit compressed instructions when building Linux"
 	default n
