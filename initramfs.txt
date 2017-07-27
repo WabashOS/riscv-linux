@@ -21,3 +21,4 @@ file /init_cgrp.sh ./pfa_tests/util/init_cgrp.sh 755 0 0
 file /init_swap.sh ./pfa_tests/util/init_swap.sh 755 0 0
 file /run_cg.sh ./pfa_tests/util/run_cg.sh 755 0 0
 file /test.sh ./pfa_tests/util/test.sh 755 0 0
+file /unit ./pfa_tests/unit/unit 755 0 0

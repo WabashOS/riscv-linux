@@ -54,8 +54,8 @@ bool test_single(void) {
 
   /* Protect the page */
   /* printf("Giving page %p to pfa\n", pg); */
-  printf("user calling sys\n");
-  pid_t p = syscall(SYS_pfa, pg);
+  printf("user calling sys on vaddr %p\n", pg);
+  syscall(SYS_pfa, pg);
   printf("user called sys\n");
 
   /* Try to access */
@@ -68,6 +68,9 @@ bool test_single(void) {
 
   printf("I poked it (cycle %ld)!\n", after);
   printf("Total Cycles: %ld\n", after - before);
+
+  /* Drain the newpage q */
+  syscall(SYS_pfa, 0);
 
   if(val == 42) {
     return true;
@@ -107,6 +110,9 @@ bool test_multi(void) {
     }
   }
   printf("I poked them  (%d)!\n", val);
+
+  /* Drain the newpage q */
+  syscall(SYS_pfa, 0);
 
   return true;
 }

@@ -153,9 +153,8 @@ static inline unsigned long pmd_page_vaddr(pmd_t pmd)
 /* Yields the page frame number (PFN) of a page table entry */
 static inline unsigned long pte_pfn(pte_t pte)
 {
-  /* Must also ignore PAGE_REMOTE bit which is in MSB unfortunately */
-	return ((pte_val(pte) & ~_PAGE_REMOTE) >> _PAGE_PFN_SHIFT);
-	// return (pte_val(pte) >> _PAGE_PFN_SHIFT);
+  /* Must also ignore _PAGE_HWRES bits which are in MSB unfortunately */
+	return ((pte_val(pte) & ~_PAGE_HWRES) >> _PAGE_PFN_SHIFT);
 }
 
 #define pte_page(x)     pfn_to_page(pte_pfn(x))
