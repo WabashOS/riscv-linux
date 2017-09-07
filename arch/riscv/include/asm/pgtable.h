@@ -187,6 +187,8 @@ static inline pte_t *pte_offset_kernel(pmd_t *pmd, unsigned long addr)
  */
 static inline void set_pte(pte_t *ptep, pte_t pteval)
 {
+  /* USE_PFA Make sure to preserve the remote bit */
+  pteval = __pte(pte_val(pteval) | (pte_val(*ptep) & _PAGE_REMOTE));
 	*ptep = pteval;
 }
 
@@ -252,6 +254,12 @@ static inline int pte_special(pte_t pte)
 	return pte_val(pte) & _PAGE_SPECIAL;
 }
 
+static inline int pte_remote(pte_t pte)
+{
+  /* Note: cast from long->int loses upper bit, hence the '== 0' check */
+  return ((pte_val(pte) & _PAGE_REMOTE) >> 62);
+}
+
 /* static inline pte_t pte_rdprotect(pte_t pte) */
 
 static inline pte_t pte_wrprotect(pte_t pte)
@@ -291,6 +299,16 @@ static inline pte_t pte_mkold(pte_t pte)
 static inline pte_t pte_mkspecial(pte_t pte)
 {
 	return __pte(pte_val(pte) | _PAGE_SPECIAL);
+}
+
+static inline pte_t pte_mkremote(pte_t pte)
+{
+  return __pte(pte_val(pte) | _PAGE_REMOTE);
+}
+
+static inline pte_t pte_mklocal(pte_t pte)
+{
+  return __pte(pte_val(pte) & ~(_PAGE_REMOTE));
 }
 
 /* Modify page protection bits */
@@ -401,7 +419,8 @@ static inline int ptep_clear_flush_young(struct vm_area_struct *vma,
 #define __swp_entry(type, offset) ((swp_entry_t) \
 	{ ((type) << __SWP_TYPE_SHIFT) | ((offset) << __SWP_OFFSET_SHIFT) })
 
-#define __pte_to_swp_entry(pte)	((swp_entry_t) { pte_val(pte) })
+/* XXX PFA need to ignore _PAGE_REMOTE bit  */
+#define __pte_to_swp_entry(pte)	((swp_entry_t) { pte_val(pte) & ~(_PAGE_REMOTE)})
 #define __swp_entry_to_pte(x)	((pte_t) { (x).val })
 
 #ifdef CONFIG_FLATMEM

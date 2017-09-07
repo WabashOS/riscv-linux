@@ -63,6 +63,7 @@
 #include <linux/hugetlb.h>
 #include <linux/backing-dev.h>
 #include <linux/page_idle.h>
+#include <linux/pfa.h>
 
 #include <asm/tlbflush.h>
 
@@ -1459,7 +1460,12 @@ static bool try_to_unmap_one(struct page *page, struct vm_area_struct *vma,
 			swp_pte = swp_entry_to_pte(entry);
 			if (pte_soft_dirty(pteval))
 				swp_pte = pte_swp_mksoft_dirty(swp_pte);
-			set_pte_at(mm, address, pvmw.pte, swp_pte);
+
+#ifdef USE_PFA
+      printk("pte: %lx\n", *(pvmw.pte));
+      pfa_evict(address, virt_to_phys(pvmw.pte));
+#endif
+      set_pte_at(mm, address, pvmw.pte, swp_pte);
 		} else
 			dec_mm_counter(mm, mm_counter_file(page));
 discard:

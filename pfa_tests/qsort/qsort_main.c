@@ -18,6 +18,8 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <sys/syscall.h>
+#include <unistd.h>
 
 // The INSERTION_THRESHOLD is the size of the subarray when the
 // algorithm switches to using an insertion sort instead of
@@ -177,6 +179,7 @@ uint64_t get_cycle(void)
 int main( int argc, char* argv[] )
 {
   uint64_t start, end;
+
   start = get_cycle();
 
   if(argc != 2) {

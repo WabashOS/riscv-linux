@@ -1200,7 +1200,7 @@ static unsigned long shrink_page_list(struct list_head *page_list,
 				if (PageDirty(page))
 					goto keep;
 
-				/*
+        /*
 				 * A synchronous write - probably a ramdisk.  Go
 				 * ahead and try to reclaim the page.
 				 */

@@ -27,7 +27,6 @@
 #include <linux/perf_event.h>
 #include <linux/signal.h>
 #include <linux/uaccess.h>
-#include <linux/pfa_helper.h>
 
 #include <asm/pgalloc.h>
 #include <asm/ptrace.h>
@@ -49,9 +48,6 @@ asmlinkage void do_page_fault(struct pt_regs *regs)
 	cause = regs->scause;
 	addr = regs->sbadaddr;
 
-  if(IS_PFA_ADDR(addr)) {
-    printk("PFA: do_page_fault cycle: %lld\n", get_cycle());
-  }
 	tsk = current;
 	mm = tsk->mm;
 
@@ -174,9 +170,6 @@ good_area:
 	}
 
 	up_read(&mm->mmap_sem);
-  if(IS_PFA_ADDR(addr)) {
-    printk("PFA: do_page_fault done cycles: %lld\n", get_cycles());
-  }
 	return;
 
 	/*

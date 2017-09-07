@@ -52,8 +52,6 @@ bool test_single(void) {
   after = get_cycle();
   printf("Timer verification: %ld\n", after - before);
 
-  /* Protect the page */
-  /* printf("Giving page %p to pfa\n", pg); */
   printf("user calling sys on vaddr %p\n", pg);
   syscall(SYS_pfa, pg);
   printf("user called sys\n");
@@ -112,7 +110,7 @@ bool test_multi(void) {
   printf("I poked them  (%d)!\n", val);
 
   /* Drain the newpage q */
-  syscall(SYS_pfa, 0);
+  syscall(SYS_PFA, 0);
 
   return true;
 }

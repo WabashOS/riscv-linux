@@ -67,8 +67,8 @@
 #include <linux/dma-debug.h>
 #include <linux/debugfs.h>
 #include <linux/userfaultfd_k.h>
-#include <linux/pfa_helper.h>
 #include <linux/dax.h>
+#include <linux/pfa.h>
 
 #include <asm/io.h>
 #include <asm/mmu_context.h>
@@ -2664,10 +2664,6 @@ void unmap_mapping_range(struct address_space *mapping,
 }
 EXPORT_SYMBOL(unmap_mapping_range);
 
-/* XXX PFA */
-/* #Cycles to access 1 page from remote memory */
-#define PFA_ACCESS_DELAY 0
-
 /*
  * We enter with non-exclusive mmap_sem (to exclude vma changes,
  * but allow concurrent faults), and pte mapped but not yet locked.
@@ -2686,27 +2682,6 @@ int do_swap_page(struct vm_fault *vmf)
 	int locked;
 	int exclusive = 0;
 	int ret = 0;
-
-  /* XXX PFA */
-  /* Check for my special page and process */
-  if (IS_PFA_ADDR(vmf->address)) {
-    
-    /* Insert delay to account for remote memory access time as if we had a
-     * real driver here */
-    uint64_t target_cycle = get_cycle() + PFA_ACCESS_DELAY;
-    volatile uint64_t current_cycle;
-    printk("I saw the special process. (cycle %ld) !\n", get_cycle());
-    printk("Waiting for %d cycles\n", PFA_ACCESS_DELAY);
-    do {
-      current_cycle = get_cycle();
-    } while(target_cycle > current_cycle);
-    
-    /* Mark the page "present" and return */
-    /* XXX I'm supposed to lock vmf-pte using vmf-ptl but I don't know how...*/
-    set_pte(vmf->pte, pte_mk_present(vmf->orig_pte));
-    pte_unmap(vmf->pte);
-    goto out;
-  }
 
   if (!pte_unmap_same(vma->vm_mm, vmf->pmd, vmf->pte, vmf->orig_pte))
 		goto out;
@@ -3748,6 +3723,11 @@ static int handle_pte_fault(struct vm_fault *vmf)
 		else
 			return do_fault(vmf);
 	}
+  
+#ifdef USE_PFA
+  if(pte_remote(vmf->orig_pte))
+    return pfa_handle_fault(vmf);
+#endif
 
 	if (!pte_present(vmf->orig_pte))
 		return do_swap_page(vmf);
