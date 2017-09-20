@@ -32,19 +32,20 @@
 #define _PAGE_ACCESSED  (1 << _PAGE_ACCESSED_OFFSET)  /* Set by hardware on any access */
 #define _PAGE_DIRTY     (1 << 7)    /* Set by hardware on any write */
 #define _PAGE_SOFT      (1 << 8)    /* Reserved for software */
-#define _PAGE_REMOTE    (1ul << 63)   /* Remote (handled by PFA) Should never modify directly, read only for debugging/optimization */
+
+/* Remote bit only valid if the PTE is marked invalid (_PAGE_PRESENT is clear)
+ * See linux/pfa.h for details of remote PTE format */
+#define _PAGE_REMOTE    (1 << 1)
 
 #define _PAGE_SPECIAL   _PAGE_SOFT
 #define _PAGE_TABLE     _PAGE_PRESENT
-#define _PAGE_HWRES     (~(~0ul >> 10)) /* These bits are reserved by HW and should not be modified XXX only for Sv48 */
 
 #define _PAGE_PFN_SHIFT 10
 
 /* Set of bits to preserve across pte_modify() */
 #define _PAGE_CHG_MASK  (~(unsigned long)(_PAGE_PRESENT | _PAGE_READ |	\
 					  _PAGE_WRITE | _PAGE_EXEC |	\
-					  _PAGE_USER | _PAGE_GLOBAL | \
-            _PAGE_HWRES))
+					  _PAGE_USER | _PAGE_GLOBAL))
 
 /* Advertise support for _PAGE_SPECIAL */
 #define __HAVE_ARCH_PTE_SPECIAL

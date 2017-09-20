@@ -153,8 +153,7 @@ static inline unsigned long pmd_page_vaddr(pmd_t pmd)
 /* Yields the page frame number (PFN) of a page table entry */
 static inline unsigned long pte_pfn(pte_t pte)
 {
-  /* Must also ignore _PAGE_HWRES bits which are in MSB unfortunately */
-	return ((pte_val(pte) & ~_PAGE_HWRES) >> _PAGE_PFN_SHIFT);
+	return (pte_val(pte) >> _PAGE_PFN_SHIFT);
 }
 
 #define pte_page(x)     pfn_to_page(pte_pfn(x))
@@ -256,8 +255,8 @@ static inline int pte_special(pte_t pte)
 
 static inline int pte_remote(pte_t pte)
 {
-  /* Note: cast from long->int loses upper bit, hence the '== 0' check */
-  return ((pte_val(pte) & _PAGE_REMOTE) >> 62);
+  return (!(pte_val(pte) & _PAGE_PRESENT) &&
+           (pte_val(pte) & _PAGE_REMOTE));
 }
 
 /* static inline pte_t pte_rdprotect(pte_t pte) */
@@ -299,16 +298,6 @@ static inline pte_t pte_mkold(pte_t pte)
 static inline pte_t pte_mkspecial(pte_t pte)
 {
 	return __pte(pte_val(pte) | _PAGE_SPECIAL);
-}
-
-static inline pte_t pte_mkremote(pte_t pte)
-{
-  return __pte(pte_val(pte) | _PAGE_REMOTE);
-}
-
-static inline pte_t pte_mklocal(pte_t pte)
-{
-  return __pte(pte_val(pte) & ~(_PAGE_REMOTE));
 }
 
 /* Modify page protection bits */
@@ -419,8 +408,7 @@ static inline int ptep_clear_flush_young(struct vm_area_struct *vma,
 #define __swp_entry(type, offset) ((swp_entry_t) \
 	{ ((type) << __SWP_TYPE_SHIFT) | ((offset) << __SWP_OFFSET_SHIFT) })
 
-/* XXX PFA need to ignore _PAGE_REMOTE bit  */
-#define __pte_to_swp_entry(pte)	((swp_entry_t) { pte_val(pte) & ~(_PAGE_REMOTE)})
+#define __pte_to_swp_entry(pte)	((swp_entry_t) { pte_val(pte) })
 #define __swp_entry_to_pte(x)	((pte_t) { (x).val })
 
 #ifdef CONFIG_FLATMEM
