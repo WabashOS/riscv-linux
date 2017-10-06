@@ -2,6 +2,7 @@
 #include <linux/pfa.h>
 #include <linux/io.h>
 #include <linux/gfp.h>
+#include "internal.h"
 
 /* Phyiscal addr for MMIO to pfa */
 #define PFA_IO_BASE           0x2000
@@ -9,26 +10,33 @@
 #define PFA_IO_FREESTAT            (PFA_IO_BASE + 8)
 #define PFA_IO_EVICTPAGE           (PFA_IO_BASE + 16)
 #define PFA_IO_EVICTSTAT           (PFA_IO_BASE + 24)
-#define PFA_IO_NEWPAGE             (PFA_IO_BASE + 32)
-#define PFA_IO_NEWSTAT             (PFA_IO_BASE + 40)
+#define PFA_IO_NEWPGID             (PFA_IO_BASE + 32)
+#define PFA_IO_NEWVADDR            (PFA_IO_BASE + 40)
+#define PFA_IO_NEWSTAT             (PFA_IO_BASE + 48)
 
 /* Properties of PFA */
 #define PFA_FREE_MAX 64
 #define PFA_NEW_MAX PFA_FREE_MAX
 #define PFA_EVICT_MAX 1
 
+/* Global var. See pfa.h for details */
+struct task_struct *pfa_tsk;
+
 /* After initialization, points to the kernel MMIO addresses for the PFA */
 void __iomem *pfa_io_free;
 void __iomem *pfa_io_freestat;
 void __iomem *pfa_io_evict;
 void __iomem *pfa_io_evictstat;
-void __iomem *pfa_io_new;
+void __iomem *pfa_io_newpgid;
+void __iomem *pfa_io_newvaddr;
 void __iomem *pfa_io_newstat;
 
-/* Used for registering a process with the PFA subsystem.
- * Only one process an use the PFA for now */
-pid_t pfa_pid = -1;
-unsigned long pfa_addr = 0;
+/* Holds every frame (struct page*) that is given to the PFA in FIFO order */
+#define PFA_FRAMEQ_MAX (PFA_FREE_MAX + PFA_NEW_MAX)
+int pfa_frameq_head = 0;
+int pfa_frameq_tail = 0;
+int pfa_frameq_size = 0;
+struct page* pfa_frameq[PFA_FRAMEQ_MAX] = {NULL};
 
 /* Local Functions */
 void pfa_fill_freeq(void);
@@ -38,89 +46,283 @@ void pfa_init(void)
   /* Register RPFH I/O addr */
   printk("Linux Initializing PFA\n");
   
+  /* Setup MMIO */
   pfa_io_free = ioremap(PFA_IO_FREEFRAME, 8);
   pfa_io_freestat = ioremap(PFA_IO_FREESTAT, 8);
   pfa_io_evict = ioremap(PFA_IO_EVICTPAGE, 8);
   pfa_io_evictstat = ioremap(PFA_IO_EVICTSTAT, 8);
-  pfa_io_new = ioremap(PFA_IO_NEWPAGE, 8);
+  pfa_io_newpgid = ioremap(PFA_IO_NEWPGID, 8);
+  pfa_io_newvaddr = ioremap(PFA_IO_NEWVADDR, 8);
   pfa_io_newstat = ioremap(PFA_IO_NEWSTAT, 8);
 }
 
 /* Evict a page to the pfa.
  * ptep - paddr of pte for the page to be evicted
  */
-void pfa_evict(uintptr_t vaddr, uintptr_t page_paddr)
+void pfa_evict(swp_entry_t swp_ent, uintptr_t page_paddr)
 {
-   /* Evict Page */
-  pfa_trace("Evicting page 0x%lx at 0x%lx\n", vaddr, page_paddr);
-  writeq(vaddr, pfa_io_evict);
-  writeq(page_paddr, pfa_io_evict);
+  uint64_t evict_val;
+  int mapcount;
+
+  /* Evict Page */
+  pfa_trace("Evicting page (paddr=0x%lx pgid=%d)\n",
+      page_paddr,
+      pfa_swp_to_pgid(swp_ent));
+
+#ifdef PFA_DEBUG
+  /* I'm not sure if this is possible in Linux, but free frames may end up on
+   * the lru lists and get re-selected for eviction. */
+  if(pfa_frameq_search(page_paddr)) {
+      panic("evicting frame on frameq: paddr=%lx\n", page_paddr);
+  }
+
+  /* The PFA will get right-screwy if we evict shared pages. Who knows what
+   * chaos might ensue if that happens! */
+  mapcount = page_mapcount(phys_to_page(page_paddr));
+  if(mapcount > 1) {
+    panic("Page (paddr 0x%lx) shared %d times (sharing not supported in pfa)\n",
+        page_paddr, mapcount);
+  }
+#endif
+
+  /* Form the packed eviction value defined in pfa spec */
+  evict_val = page_paddr >> PAGE_SHIFT;
+  BUG_ON(evict_val >> PFA_EVICT_PGID_SHIFT != 0);
+  evict_val |= ((uint64_t)pfa_swp_to_pgid(swp_ent) << PFA_EVICT_PGID_SHIFT);
+
+  writeq(evict_val, pfa_io_evict);
  
   /* Wait for completion */
-  while(readq(pfa_io_evict) != 0) {}
-
-  /* XXX not sure if I really want to do this here long-term */
-  /* Add free frames */
-  pfa_fill_freeq();
+  while(readq(pfa_io_evictstat) < PFA_EVICT_MAX) {}
 }
 
 /* Add the frame at pfn to the list of free frames for the pfa.
  * pfn - the page frame number to be added 
  */
-void pfa_free(uintptr_t pte_paddr)
+void pfa_free(struct page* pg)
 {
-  pfa_trace("Adding 0x%lx to freelist\n", pte_paddr);
-  writeq(pte_paddr, pfa_io_free);
+  pfa_trace("Adding 0x%llx to freelist (mapcount %d)\n", page_to_phys(pg), page_mapcount(pg));
+  writeq(page_to_phys(pg), pfa_io_free);
+  pfa_frameq_push(pg);
 }
 
+/* This version drains the newq but doesn't do anything.
+ * useful for testing */
 void pfa_new(void)
+{
+  void *vaddr = NULL;
+  pfa_pgid_t pgid = 0;
+  struct page* frame;
+
+  BUG_ON(readq(pfa_io_newstat) == 0);
+  vaddr = (void*)readq(pfa_io_newvaddr);
+  pgid = readq(pfa_io_newpgid);
+  frame = pfa_frameq_pop();
+
+  printk("New Page: pgid=%d, vaddr=%p\n", pgid, vaddr);
+  return;
+}
+/* XXX PFA */
+#if 0
+/* Much of this code is stolen from handle_mm_fault */
+void pfa_new(void)
+{
+  int ret;
+  struct mm_struct *mm;
+  struct vm_area_struct *vma;
+  /* These flags are coppied from do_page_fault, I'm not 100% on them */
+  unsigned int flags = FAULT_FLAG_ALLOW_RETRY | 
+                       FAULT_FLAG_KILLABLE |
+                       FAULT_FLAG_USER;
+	struct vm_fault vmf;
+  uintptr_t vaddr = 0;
+  swp_entry_t entry;
+  struct page *new_pg;
+
+  pgd_t *pgd;
+  p4d_t *p4d;
+
+#ifdef PFA_DEBUG
+  BUG_ON(readq(pfa_io_newstat) == 0);
+#endif
+
+  /* Get the new page info from newq and frameq */
+  vaddr = readq(pfa_io_newvaddr);
+  entry = pfa_pgid_to_swp(readq(pfa_io_newpgid));
+  new_pg = pfa_frameq_pop();
+  BUG_ON(!new_pg);
+
+  BUG_ON(pfa_tsk == NULL);
+  mm = pfa_tsk->mm;
+  /* Needed for page table stuff (see handle_mm_fault) */ 
+  down_read(&mm->mmap_sem);
+  
+  vma = find_vma(mm, vaddr);
+  BUG_ON(!vma);
+  /* The actual check in do_page_fault is more complicated than this
+   * I'm assuming swap-triggered page faults always satisfy this */
+  BUG_ON(!(vma->vm_start <= addr));
+
+  vmf = {
+		.vma = vma,
+		.address = vaddr & PAGE_MASK,
+		.flags = flags,
+		.pgoff = linear_page_index(vma, vaddr),
+		.gfp_mask = __get_fault_gfp_mask(vma),
+	};
+
+  /* Page-table walk to get pte. 
+   * Much error-checking elided. Look at __handle_mm_fault and
+   * _handle_pte_fault for more realistic error checking. */
+	pgd = pgd_offset(mm, address);
+	p4d = p4d_alloc(mm, pgd, address);
+  BUG_ON(!p4d);
+	vmf.pud = pud_alloc(mm, p4d, address);
+  BUG_ON(!vmf.pud);
+	vmf.pmd = pmd_alloc(mm, vmf.pud, address);
+  BUG_ON(!vmf.pmd);
+  vmf->pte = pte_offset_map(vmf->pmd, vmf->address);
+  vmf->orig_pte = *vmf->pte;
+  BUG_ON(pte_none(vmf->orig_pte));
+
+  /* This all works on the assumption that the frameq has the paddr of the
+   * frame used for this page. This works so long as pfa_register_new is only
+   * called with pages in order from the newq */
+  BUG_ON(pte_page(vmf->orig_pte) != pfa_frameq[pfa_frameq_tail]);
+
+  /* Put the swap entry back into the PTE so we can use the unmodified
+   * do_swap_page */
+  vmf->orig_pte = swp_entry_to_pte(entry);
+	set_pte_at(mm, vaddr, vmf->pte, vmf->orig_pte);
+
+  ret = do_swap_page(vmf);
+  BUG_ON(ret & VM_FAULT_ERROR);
+
+  up_read(&mm->mmap_sem);
+
+  pfa_register_new(&pfa_pgid_to_swp(new_pgid), /*XXX*/addr);
+
+  pfa_trace("New Page fetched: id=0x%lx, paddr=0x%llx\n",
+      new_pgid,
+      page_to_phys(new_pg));
+
+  return;
+}
+#endif
+
+void pfa_drain_newq(void)
 {
   uint64_t nnew = readq(pfa_io_newstat);
   while(nnew)
   {
-    uintptr_t newpage = readq(pfa_io_new);
-    pfa_trace("New Page fetched: 0x%lx\n", newpage);
+    pfa_new(); 
     nnew--;
   }
 }
 
-void pfa_fill_freeq(void) {
+void pfa_fill_freeq(void)
+{
   struct page* pg;
 
-  uint64_t nnew;
+  uint64_t nframe;
   
-  nnew = readq(pfa_io_freestat);
+  nframe = readq(pfa_io_freestat);
 
-  while(nnew) {
+  while(nframe) {
     /* This might block or trigger swapping which would be bad if we call
      * pfa_fill_new from the pageout path... */
     pg = alloc_page(GFP_HIGHUSER_MOVABLE);
-    pfa_free(page_to_phys(pg));
-    nnew--;
+
+#ifdef PFA_DEBUG
+    /* Don't want pages with user mappings going out, this is just me being
+     * paranoid (alloc_page really shouldn't) */
+    if(unlikely(page_mapcount(pg) > 0)) {
+      panic("newly alloced page has nonzero mapcount (%d)!\n", page_mapcount(pg));
+    }
+#endif
+
+    pfa_free(pg);
+    nframe--;
   }
 }
 
 /* Right now, we don't handle any fault, just report and return an error */
 int pfa_handle_fault(struct vm_fault *vmf)
 {
-  pfa_trace("Page fault received on remote page\n");
+  pfa_trace("Page fault received on remote page (vaddr=0x%lx)\n",
+      vmf->address & PAGE_MASK);
 
   if(readq(pfa_io_freestat) == PFA_FREE_MAX) {
     /* FreeQ Empty */
     pfa_trace("FreeQ Empty!\n");
     pfa_fill_freeq();
     pfa_trace("Filled FreeQ\n");
-    return 0;
-  } else if(readq(pfa_io_newstat) == PFA_NEW_MAX) {
+  }
+  
+  if(readq(pfa_io_newstat) == PFA_NEW_MAX) {
     /* NewQ Full */
     pfa_trace("NewQ full!\n");
-    pfa_new();
+    pfa_drain_newq();
     pfa_trace("Drained NewQ\n");
-    return 0;
-  } else {
-    pfa_trace("WARNING: Page fault on remote page but all queues are healthy.\n");
-    return VM_FAULT_SIGBUS;
   }
 
   return 0;
 }
+
+void pfa_frameq_push(struct page *frame)
+{
+  BUG_ON(pfa_frameq_size == PFA_FRAMEQ_MAX);
+
+#ifdef PFA_DEBUG
+  BUG_ON(pfa_frameq_search(page_to_phys(frame)));
+#endif
+
+  pfa_frameq[pfa_frameq_head] = frame;
+
+  pfa_frameq_head = (pfa_frameq_head + 1) % PFA_FRAMEQ_MAX;
+  pfa_frameq_size++;
+
+  return;
+}
+
+struct page* pfa_frameq_pop(void)
+{
+  struct page *ret;
+
+  BUG_ON(pfa_frameq_size == 0);
+  ret = pfa_frameq[pfa_frameq_tail];
+  BUG_ON(ret == NULL);
+  
+  pfa_frameq[pfa_frameq_tail] = NULL;
+
+  pfa_frameq_tail = (pfa_frameq_tail + 1) % PFA_FRAMEQ_MAX;
+  pfa_frameq_size--;
+
+  return ret;
+}
+
+int pfa_frameq_search(uintptr_t paddr)
+{
+  int i;
+  for(i = pfa_frameq_tail; i != pfa_frameq_head; i = (i + 1) % PFA_FRAMEQ_MAX)
+  {
+    if(pfa_frameq[i] == NULL) {
+      panic("Invalid frameq entry\n");
+    }
+    if(page_to_phys(pfa_frameq[i]) == paddr) {
+      return 1;
+    }
+  }
+
+  return 0;
+}
+
+void pfa_set_tsk(struct task_struct *tsk)
+{
+  if(pfa_tsk != NULL) {
+    panic("Resetting the pfa_tsk not currently supported\n");
+  }
+  pfa_tsk = tsk;
+  return;
+}
+

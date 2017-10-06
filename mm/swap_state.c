@@ -19,6 +19,7 @@
 #include <linux/migrate.h>
 #include <linux/vmalloc.h>
 #include <linux/swap_slots.h>
+#include <linux/pfa.h>
 
 #include <asm/pgtable.h>
 
@@ -338,11 +339,23 @@ struct page *__read_swap_cache_async(swp_entry_t entry, gfp_t gfp_mask,
 		/*
 		 * Get a new page to read into from swap.
 		 */
+#ifdef USE_PFA
+    if(!new_page) {
+      if(current == pfa_get_tsk()) {
+        new_page = pfa_frameq_pop();
+      } else {
+        new_page = alloc_page_vma(gfp_mask, vma, addr);
+      }
+		}
+    if (!new_page)
+      break;		/* Out of memory */
+#else
 		if (!new_page) {
 			new_page = alloc_page_vma(gfp_mask, vma, addr);
 			if (!new_page)
 				break;		/* Out of memory */
 		}
+#endif
 
 		/*
 		 * call radix_tree_preload() while we can wait.

@@ -146,12 +146,15 @@ static int rswap_frontswap_store(unsigned type, pgoff_t offset,
   int cpu;
 
 #ifdef USE_PFA
-  int mapcount = atomic_read(&(page->_mapcount));
-  if(mapcount > 1) {
-    printk("Page mapped %d times\n", mapcount);
+  if(current == pfa_get_tsk()) {
+    int mapcount = atomic_read(&(page->_mapcount));
+    if(mapcount > 1) {
+      printk("Page mapped %d times\n", mapcount);
+    }
+
+    /* for PFA, we actually store the page during try_to_unmap_one */
+    return 0;
   }
-  /* for PFA, we actually store the page during try_to_unmap_one */
-  return 0;
 #endif
 
   created_rpage = false;
@@ -202,6 +205,13 @@ static int rswap_frontswap_load(unsigned type, pgoff_t offset,
   struct rswap_page *rpage;
   void *page_vaddr;
   int cpu;
+
+#ifdef USE_PFA
+  if(current == pfa_get_tsk()) {
+    printk("RSWAP: Loading from rswap, but PFA is enabled. This shouldn't happen!");
+    BUG();
+  }
+#endif
 
   /* find page */
   rpage = rhashtable_lookup_fast(&page_ht, &offset, htparams);
@@ -258,6 +268,7 @@ static void rswap_frontswap_init(unsigned type)
 #ifdef USE_PFA
   pfa_init();
 #endif
+
   pr_info("rswap_frontswap_init end\n");
 }
 

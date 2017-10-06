@@ -6,9 +6,15 @@ find  $LNX                                                                \
     -path "$LNX/Documentation*" -prune -o                                 \
     -path "$LNX/scripts*" -prune -o                                       \
     -path "$LNX/drivers*" -prune -o                                       \
-        -name "*.[chxsS]" -print > cscope.files
+    -path "$LNX/tools/*" -prune -o \
+    -name "*.[chxsS]" -print > cscope.files
 
 # I can't make find exluce /arch/* except /arch/riscv, force it here
-find $LNX -path "$LNX/arch/riscv/*" >> cscope.files
+find $LNX \
+  -path "$LNX/arch/riscv/*" \
+  -name "*.[chxsS]" >> cscope.files
 
 cscope -bk
+
+
+

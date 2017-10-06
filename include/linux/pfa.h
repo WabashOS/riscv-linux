@@ -3,18 +3,22 @@
 
 #include <asm/page.h>
 #include <asm/pgtable.h>
-// #include <asm/pgtable-bits.h>
 #include <linux/swap.h>
 #include <linux/swapops.h>
 
-extern pid_t pfa_pid;
-extern unsigned long pfa_addr;
+/* The PFA can only work for one task at a time right now. 
+ * NULL if no one has registered with the PFA. */
+extern struct task_struct *pfa_tsk;
 
+/* If set, linux uses PFA. Otherwise, rswap is used */
 #define USE_PFA
 
+/* Only turn this on for extra paranoid debugging (significant performance hit) */
+#define PFA_DEBUG
+
 /* Remote PTE */
-#define PFA_PGID_SHIFT 12
-#define PFA_PROT_SHIFT   2
+#define PFA_PGID_SHIFT  12
+#define PFA_PROT_SHIFT  2
 
 /* Use this for noisy messages you might want to turn off */
 #define pfa_trace(M, ...) printk("PFA_TRACE: " M, ##__VA_ARGS__)
@@ -22,9 +26,12 @@ extern unsigned long pfa_addr;
 
 /* pgid is a compressed form of swp_entry_t. It assumes that type=0 and then
  * just uses the offset as pgid */
-typedef uint64_t pfa_pgid_t;
-/* Maximum size of a PageID (in bits) */
-#define PFA_PGID_BITS (sizeof(pte_t)*8 - PFA_PGID_SHIFT)
+typedef uint32_t pfa_pgid_t;
+
+/* Maximum size of a PageID (in bits). Defined in pfa_spec. */
+#define PFA_PGID_BITS 28 
+/* Location of PGID in an eviction value (defined in pfa_spec) */
+#define PFA_EVICT_PGID_SHIFT 36
 
 static inline uint64_t get_cycle(void)
 {
@@ -36,17 +43,19 @@ static inline uint64_t get_cycle(void)
 /* initialize the system, only call once! */
 void pfa_init(void);
 
-/* Evict a page to the pfa.
- * ptep - paddr of pte for the page to be evicted
- */
-void pfa_evict(uintptr_t vaddr, uintptr_t page_paddr);
+/* Evict a page to the pfa. */
+void pfa_evict(swp_entry_t swp_ent, uintptr_t page_paddr);
 
 /* Add the frame at pfn to the list of free frames for the pfa.
  * pfn - the page frame number to be added 
  */
-void pfa_free(unsigned long pte_paddr);
+void pfa_free(struct page *pg);
 
 /* Fetch and report every newpage from PFA */
+void pfa_drain_newq(void);
+
+/* Process one entry from the newq.
+ * Assumes there is at least one entry in newq (check NEWSTAT first). */
 void pfa_new(void);
 
 /* Provides enough free frames to the PFA to fill it's queues */
@@ -99,5 +108,16 @@ static inline pte_t pfa_mk_remote_pte(swp_entry_t swp_ent, pgprot_t prot)
         _PAGE_REMOTE
        );
 }
+
+/* The frameq should hold frames in the PFA in FIFO order. 
+ * It uses the page->lru list element which should be unused */
+void pfa_frameq_push(struct page *frame);
+struct page* pfa_frameq_pop(void);
+
+/* Searches the frameq for paddr. Returns 1 if found, 0 otherwise */
+int pfa_frameq_search(uintptr_t paddr);
+
+void pfa_set_tsk(struct task_struct *tsk);
+static inline struct task_struct *pfa_get_tsk(void) { return pfa_tsk; }
 
 #endif

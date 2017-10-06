@@ -20,6 +20,7 @@
 #include <stdio.h>
 #include <sys/syscall.h>
 #include <unistd.h>
+#include <stdbool.h>
 
 // The INSERTION_THRESHOLD is the size of the subarray when the
 // algorithm switches to using an insertion sort instead of
@@ -176,6 +177,17 @@ uint64_t get_cycle(void)
 }
 #endif
 
+bool check_sort(type *arr, size_t n)
+{ 
+  for(int i = 0; i < (n - 1); i++) {
+    if(arr[i] > arr[i+1]) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 int main( int argc, char* argv[] )
 {
   uint64_t start, end;
@@ -199,9 +211,14 @@ int main( int argc, char* argv[] )
   printf("Gonna sort me sum datas!\n");
   // Do the sort
   sort(n, arr);
-  printf("Prolly sorted 'em by now\n");
   end = get_cycle();
   printf("Took %ld Cycles\n", end - start);
+  if(check_sort(arr, n)) {
+    printf("Prolly sorted 'em by now\n");
+  } else {
+    printf("I sorted wrong!!!!\n");
+    return EXIT_FAILURE;
+  }
 
   return EXIT_SUCCESS;
 }

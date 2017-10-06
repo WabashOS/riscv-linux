@@ -2537,6 +2537,15 @@ static int do_wp_page(struct vm_fault *vmf)
 		return wp_page_copy(vmf);
 	}
 
+#ifdef USE_PFA
+  /* XXX PFA */
+  if(pfa_frameq_search(page_to_phys(vmf->page))) {
+    panic("Write-protect fault on frameq frame: vaddr=0x%lx, paddr=0x%llx\n",
+        vmf->address,
+        page_to_phys(vmf->page));
+  }
+#endif
+
 	/*
 	 * Take out anonymous pages first, anonymous shared vmas are
 	 * not dirty accountable.
@@ -3725,7 +3734,7 @@ static int handle_pte_fault(struct vm_fault *vmf)
 	}
   
 #ifdef USE_PFA
-  if(pte_remote(vmf->orig_pte))
+  if(current == pfa_get_tsk() && pte_remote(vmf->orig_pte))
     return pfa_handle_fault(vmf);
 #endif
 
