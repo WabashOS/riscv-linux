@@ -81,6 +81,15 @@ asmlinkage void do_page_fault(struct pt_regs *regs)
 
 retry:
 	down_read(&mm->mmap_sem);
+
+#ifdef USE_PFA
+  /* We may page-fault on a page that was evicted and fetched, but not yet
+   * processed by pfa_new(). To avoid this, we proactively drain newq. */
+  /* if(tsk == pfa_get_tsk()) { */
+    pfa_drain_newq();
+  /* } */
+#endif
+
 	vma = find_vma(mm, addr);
 	if (unlikely(!vma))
 		goto bad_area;

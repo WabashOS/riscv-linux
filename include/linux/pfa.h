@@ -55,7 +55,8 @@ void pfa_free(struct page *pg);
 void pfa_drain_newq(void);
 
 /* Process one entry from the newq.
- * Assumes there is at least one entry in newq (check NEWSTAT first). */
+ * Assumes there is at least one entry in newq (check NEWSTAT first). 
+ * Caller must down pfa_tsk->mm->mmap_sem */
 void pfa_new(void);
 
 /* Provides enough free frames to the PFA to fill it's queues */

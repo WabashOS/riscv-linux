@@ -2540,9 +2540,10 @@ static int do_wp_page(struct vm_fault *vmf)
 #ifdef USE_PFA
   /* XXX PFA */
   if(pfa_frameq_search(page_to_phys(vmf->page))) {
-    panic("Write-protect fault on frameq frame: vaddr=0x%lx, paddr=0x%llx\n",
+    printk("Write-protect fault on frameq frame: vaddr=0x%lx, paddr=0x%llx\n",
         vmf->address,
         page_to_phys(vmf->page));
+    BUG();
   }
 #endif
 

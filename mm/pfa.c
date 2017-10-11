@@ -106,6 +106,7 @@ void pfa_free(struct page* pg)
   pfa_frameq_push(pg);
 }
 
+#if 0
 /* This version drains the newq but doesn't do anything.
  * useful for testing */
 void pfa_new(void)
@@ -122,22 +123,21 @@ void pfa_new(void)
   printk("New Page: pgid=%d, vaddr=%p\n", pgid, vaddr);
   return;
 }
-/* XXX PFA */
-#if 0
+#endif
+
 /* Much of this code is stolen from handle_mm_fault */
 void pfa_new(void)
 {
   int ret;
   struct mm_struct *mm;
-  struct vm_area_struct *vma;
   /* These flags are coppied from do_page_fault, I'm not 100% on them */
   unsigned int flags = FAULT_FLAG_ALLOW_RETRY | 
                        FAULT_FLAG_KILLABLE |
                        FAULT_FLAG_USER;
 	struct vm_fault vmf;
-  uintptr_t vaddr = 0;
   swp_entry_t entry;
   struct page *new_pg;
+  pfa_pgid_t new_pgid;
 
   pgd_t *pgd;
   p4d_t *p4d;
@@ -147,72 +147,65 @@ void pfa_new(void)
 #endif
 
   /* Get the new page info from newq and frameq */
-  vaddr = readq(pfa_io_newvaddr);
-  entry = pfa_pgid_to_swp(readq(pfa_io_newpgid));
+  vmf.address = readq(pfa_io_newvaddr) & PAGE_MASK;
+  new_pgid = (pfa_pgid_t)readq(pfa_io_newpgid);
+  entry = pfa_pgid_to_swp(new_pgid);
   new_pg = pfa_frameq_pop();
   BUG_ON(!new_pg);
 
   BUG_ON(pfa_tsk == NULL);
   mm = pfa_tsk->mm;
-  /* Needed for page table stuff (see handle_mm_fault) */ 
-  down_read(&mm->mmap_sem);
   
-  vma = find_vma(mm, vaddr);
-  BUG_ON(!vma);
+  vmf.vma = find_vma(mm, vmf.address);
+  BUG_ON(!vmf.vma);
   /* The actual check in do_page_fault is more complicated than this
    * I'm assuming swap-triggered page faults always satisfy this */
-  BUG_ON(!(vma->vm_start <= addr));
+  BUG_ON(!(vmf.vma->vm_start <= vmf.address));
 
-  vmf = {
-		.vma = vma,
-		.address = vaddr & PAGE_MASK,
-		.flags = flags,
-		.pgoff = linear_page_index(vma, vaddr),
-		.gfp_mask = __get_fault_gfp_mask(vma),
-	};
+  /* XXX gfp_mask gets set in normal swap path but seems unused. */
+  vmf.flags = flags;
+  vmf.pgoff = linear_page_index(vmf.vma, vmf.address);
 
   /* Page-table walk to get pte. 
    * Much error-checking elided. Look at __handle_mm_fault and
    * _handle_pte_fault for more realistic error checking. */
-	pgd = pgd_offset(mm, address);
-	p4d = p4d_alloc(mm, pgd, address);
+	pgd = pgd_offset(mm, vmf.address);
+	p4d = p4d_alloc(mm, pgd, vmf.address);
   BUG_ON(!p4d);
-	vmf.pud = pud_alloc(mm, p4d, address);
+	vmf.pud = pud_alloc(mm, p4d, vmf.address);
   BUG_ON(!vmf.pud);
-	vmf.pmd = pmd_alloc(mm, vmf.pud, address);
+	vmf.pmd = pmd_alloc(mm, vmf.pud, vmf.address);
   BUG_ON(!vmf.pmd);
-  vmf->pte = pte_offset_map(vmf->pmd, vmf->address);
-  vmf->orig_pte = *vmf->pte;
-  BUG_ON(pte_none(vmf->orig_pte));
+  vmf.pte = pte_offset_map(vmf.pmd, vmf.address);
+  vmf.orig_pte = *vmf.pte;
+  BUG_ON(pte_none(vmf.orig_pte));
 
   /* This all works on the assumption that the frameq has the paddr of the
    * frame used for this page. This works so long as pfa_register_new is only
    * called with pages in order from the newq */
-  BUG_ON(pte_page(vmf->orig_pte) != pfa_frameq[pfa_frameq_tail]);
+  BUG_ON(pte_page(vmf.orig_pte) != pfa_frameq[pfa_frameq_tail]);
 
   /* Put the swap entry back into the PTE so we can use the unmodified
    * do_swap_page */
-  vmf->orig_pte = swp_entry_to_pte(entry);
-	set_pte_at(mm, vaddr, vmf->pte, vmf->orig_pte);
+  vmf.orig_pte = swp_entry_to_pte(entry);
+	set_pte_at(mm, vmf.address, vmf.pte, vmf.orig_pte);
 
-  ret = do_swap_page(vmf);
+  ret = do_swap_page(&vmf);
   BUG_ON(ret & VM_FAULT_ERROR);
 
-  up_read(&mm->mmap_sem);
-
-  pfa_register_new(&pfa_pgid_to_swp(new_pgid), /*XXX*/addr);
-
-  pfa_trace("New Page fetched: id=0x%lx, paddr=0x%llx\n",
+  pfa_trace("New Page fetched: id=0x%x, paddr=0x%llx\n",
       new_pgid,
       page_to_phys(new_pg));
 
   return;
 }
-#endif
 
 void pfa_drain_newq(void)
 {
   uint64_t nnew = readq(pfa_io_newstat);
+  if(nnew) 
+    pfa_trace("Draining newq\n");
+
   while(nnew)
   {
     pfa_new(); 
