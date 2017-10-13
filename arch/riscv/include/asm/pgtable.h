@@ -186,8 +186,6 @@ static inline pte_t *pte_offset_kernel(pmd_t *pmd, unsigned long addr)
  */
 static inline void set_pte(pte_t *ptep, pte_t pteval)
 {
-  /* USE_PFA Make sure to preserve the remote bit */
-  pteval = __pte(pte_val(pteval) | (pte_val(*ptep) & _PAGE_REMOTE));
 	*ptep = pteval;
 }
 

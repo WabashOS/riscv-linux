@@ -32,6 +32,7 @@
 #include <asm/ptrace.h>
 #include <asm/uaccess.h>
 
+#include <linux/pfa.h>
 /*
  * This routine handles page faults.  It determines the address and the
  * problem, and then passes it off to one of the appropriate routines.
@@ -85,9 +86,9 @@ retry:
 #ifdef USE_PFA
   /* We may page-fault on a page that was evicted and fetched, but not yet
    * processed by pfa_new(). To avoid this, we proactively drain newq. */
-  /* if(tsk == pfa_get_tsk()) { */
+  if(tsk == pfa_get_tsk()) {
     pfa_drain_newq();
-  /* } */
+  }
 #endif
 
 	vma = find_vma(mm, addr);

@@ -44,20 +44,17 @@ static inline uint64_t get_cycle(void)
 void pfa_init(void);
 
 /* Evict a page to the pfa. */
-void pfa_evict(swp_entry_t swp_ent, uintptr_t page_paddr);
+void pfa_evict(swp_entry_t swp_ent, uintptr_t page_paddr, uintptr_t vaddr);
 
 /* Add the frame at pfn to the list of free frames for the pfa.
  * pfn - the page frame number to be added 
  */
 void pfa_free(struct page *pg);
 
+int64_t pfa_nnew(void);
+
 /* Fetch and report every newpage from PFA */
 void pfa_drain_newq(void);
-
-/* Process one entry from the newq.
- * Assumes there is at least one entry in newq (check NEWSTAT first). 
- * Caller must down pfa_tsk->mm->mmap_sem */
-void pfa_new(void);
 
 /* Provides enough free frames to the PFA to fill it's queues */
 void pfa_fill_freeq(void);

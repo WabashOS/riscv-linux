@@ -1463,7 +1463,7 @@ static bool try_to_unmap_one(struct page *page, struct vm_area_struct *vma,
 
 #ifdef USE_PFA
       if(current == pfa_get_tsk()) {
-        pfa_evict(entry, page_to_phys(page));
+        pfa_evict(entry, page_to_phys(page), address);
         pteval = pfa_mk_remote_pte(entry, pvmw.vma->vm_page_prot);
         set_pte_at(mm, address, pvmw.pte, pteval);
       } else {

@@ -59,13 +59,14 @@ void pfa_init(void)
 /* Evict a page to the pfa.
  * ptep - paddr of pte for the page to be evicted
  */
-void pfa_evict(swp_entry_t swp_ent, uintptr_t page_paddr)
+void pfa_evict(swp_entry_t swp_ent, uintptr_t page_paddr, uintptr_t vaddr)
 {
   uint64_t evict_val;
   int mapcount;
 
   /* Evict Page */
-  pfa_trace("Evicting page (paddr=0x%lx pgid=%d)\n",
+  pfa_trace("Evicting page (vaddr=0x%lx paddr=0x%lx pgid=%d)\n",
+      vaddr,
       page_paddr,
       pfa_swp_to_pgid(swp_ent));
 
@@ -106,6 +107,11 @@ void pfa_free(struct page* pg)
   pfa_frameq_push(pg);
 }
 
+int64_t pfa_nnew(void)
+{
+  return readq(pfa_io_newstat);
+}
+
 #if 0
 /* This version drains the newq but doesn't do anything.
  * useful for testing */
@@ -125,8 +131,12 @@ void pfa_new(void)
 }
 #endif
 
-/* Much of this code is stolen from handle_mm_fault */
-void pfa_new(void)
+/* Process one entry from the newq.
+ * Assumes there is at least one entry in newq (check NEWSTAT first). 
+ * Caller must down pfa_tsk->mm->mmap_sem
+ *
+ * Note: Much of this code is stolen from handle_mm_fault */
+static void pfa_new(void)
 {
   int ret;
   struct mm_struct *mm;
@@ -136,11 +146,11 @@ void pfa_new(void)
                        FAULT_FLAG_USER;
 	struct vm_fault vmf;
   swp_entry_t entry;
-  struct page *new_pg;
   pfa_pgid_t new_pgid;
 
   pgd_t *pgd;
   p4d_t *p4d;
+  pte_t real_orig_pte; /* vmf.orig_pte is actually the swp_entry_t */
 
 #ifdef PFA_DEBUG
   BUG_ON(readq(pfa_io_newstat) == 0);
@@ -149,9 +159,9 @@ void pfa_new(void)
   /* Get the new page info from newq and frameq */
   vmf.address = readq(pfa_io_newvaddr) & PAGE_MASK;
   new_pgid = (pfa_pgid_t)readq(pfa_io_newpgid);
+  pfa_trace("Fetching New Page: id=%d\n", new_pgid);
+  
   entry = pfa_pgid_to_swp(new_pgid);
-  new_pg = pfa_frameq_pop();
-  BUG_ON(!new_pg);
 
   BUG_ON(pfa_tsk == NULL);
   mm = pfa_tsk->mm;
@@ -180,22 +190,14 @@ void pfa_new(void)
   vmf.orig_pte = *vmf.pte;
   BUG_ON(pte_none(vmf.orig_pte));
 
-  /* This all works on the assumption that the frameq has the paddr of the
-   * frame used for this page. This works so long as pfa_register_new is only
-   * called with pages in order from the newq */
-  BUG_ON(pte_page(vmf.orig_pte) != pfa_frameq[pfa_frameq_tail]);
-
   /* Put the swap entry back into the PTE so we can use the unmodified
    * do_swap_page */
+  real_orig_pte = vmf.orig_pte;
   vmf.orig_pte = swp_entry_to_pte(entry);
 	set_pte_at(mm, vmf.address, vmf.pte, vmf.orig_pte);
 
   ret = do_swap_page(&vmf);
   BUG_ON(ret & VM_FAULT_ERROR);
-
-  pfa_trace("New Page fetched: id=0x%x, paddr=0x%llx\n",
-      new_pgid,
-      page_to_phys(new_pg));
 
   return;
 }
@@ -204,7 +206,7 @@ void pfa_drain_newq(void)
 {
   uint64_t nnew = readq(pfa_io_newstat);
   if(nnew) 
-    pfa_trace("Draining newq\n");
+    pfa_trace("Draining %lld items from newq\n", nnew);
 
   while(nnew)
   {
@@ -252,12 +254,14 @@ int pfa_handle_fault(struct vm_fault *vmf)
     pfa_trace("Filled FreeQ\n");
   }
   
-  if(readq(pfa_io_newstat) == PFA_NEW_MAX) {
-    /* NewQ Full */
-    pfa_trace("NewQ full!\n");
-    pfa_drain_newq();
-    pfa_trace("Drained NewQ\n");
-  }
+  /* Probably don't need this anymore since we pro-actively drain newq on
+   * every page fault early on (in do_page_fault) */
+  /* if(readq(pfa_io_newstat) == PFA_NEW_MAX) { */
+  /*   #<{(| NewQ Full |)}># */
+  /*   pfa_trace("NewQ full!\n"); */
+  /*   pfa_drain_newq(); */
+  /*   pfa_trace("Drained NewQ\n"); */
+  /* } */
 
   return 0;
 }

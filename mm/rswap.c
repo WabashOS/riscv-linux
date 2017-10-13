@@ -207,9 +207,9 @@ static int rswap_frontswap_load(unsigned type, pgoff_t offset,
   int cpu;
 
 #ifdef USE_PFA
+  /* When using the PFA, the page data was already fetched. Do nothing here.*/
   if(current == pfa_get_tsk()) {
-    printk("RSWAP: Loading from rswap, but PFA is enabled. This shouldn't happen!");
-    BUG();
+    return 0;
   }
 #endif
 
@@ -238,6 +238,13 @@ static void rswap_frontswap_invalidate_page(unsigned type, pgoff_t offset)
 {
   struct rswap_page *rpage;
 
+#ifdef USE_PFA
+  /* Hopefully it's OK to never invalidate stuff? I'm not even sure what that
+   * would really mean... */
+  if(current == pfa_get_tsk())
+    return;
+#endif
+
   rpage = rhashtable_lookup_fast(&page_ht, &offset, htparams);
 
 #ifdef RSWAP_DEBUG
@@ -259,6 +266,10 @@ static void rswap_frontswap_invalidate_page(unsigned type, pgoff_t offset)
 
 static void rswap_frontswap_invalidate_area(unsigned type)
 {
+#ifdef USE_PFA
+  if(current == pfa_get_tsk())
+    return;
+#endif
   pr_err("rswap_frontswap_invalidate_area\n");
 }
 
