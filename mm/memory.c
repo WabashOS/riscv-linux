@@ -1248,7 +1248,15 @@ again:
 		if (unlikely(details))
 			continue;
 
-		entry = pte_to_swp_entry(ptent);
+#ifdef USE_PFA
+    /* This is not a complete solution, but it reduces the number of errors */
+    if (current == pfa_get_tsk() && pte_remote(ptent)) {
+      set_pte(pte, swp_entry_to_pte(pfa_remote_to_swp(ptent)));
+      ptent = *pte;
+    }
+#endif
+
+    entry = pte_to_swp_entry(ptent);
 		if (!non_swap_entry(entry))
 			rss[MM_SWAPENTS]--;
 		else if (is_migration_entry(entry)) {

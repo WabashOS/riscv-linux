@@ -208,6 +208,8 @@ no_context:
 	pr_alert("Unable to handle kernel %s at virtual address " REG_FMT "\n",
 		(addr < PAGE_SIZE) ? "NULL pointer dereference" :
 		"paging request", addr);
+  /* XXX PFA */
+  dump_stack();
 	die(regs, "Oops");
 	do_exit(SIGKILL);
 

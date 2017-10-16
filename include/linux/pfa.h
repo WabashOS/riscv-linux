@@ -21,8 +21,8 @@ extern struct task_struct *pfa_tsk;
 #define PFA_PROT_SHIFT  2
 
 /* Use this for noisy messages you might want to turn off */
-#define pfa_trace(M, ...) printk("PFA_TRACE: " M, ##__VA_ARGS__)
-// #define pfa_trace(M, ...) 
+// #define pfa_trace(M, ...) printk("PFA_TRACE: " M, ##__VA_ARGS__)
+#define pfa_trace(M, ...) 
 
 /* pgid is a compressed form of swp_entry_t. It assumes that type=0 and then
  * just uses the offset as pgid */
@@ -105,6 +105,12 @@ static inline pte_t pfa_mk_remote_pte(swp_entry_t swp_ent, pgprot_t prot)
         (pgprot_val(prot) << PFA_PROT_SHIFT) |
         _PAGE_REMOTE
        );
+}
+
+/* Retrieve the swp_entry_t from a remote pte */
+static inline swp_entry_t pfa_remote_to_swp(pte_t ptep)
+{
+  return pfa_pgid_to_swp((pfa_pgid_t)(pte_val(ptep) >> PFA_PGID_SHIFT));
 }
 
 /* The frameq should hold frames in the PFA in FIFO order. 
