@@ -100,6 +100,10 @@ static inline swp_entry_t pfa_pgid_to_swp(pfa_pgid_t pgid)
 static inline pte_t pfa_mk_remote_pte(swp_entry_t swp_ent, pgprot_t prot)
 {
   pfa_pgid_t pgid = pfa_swp_to_pgid(swp_ent);
+  /* The page will be marked "fetched" after the PFA fetches it 
+   * this flag gets cleared after bookkeeping */
+  prot = __pgprot(pgprot_val(prot) | _PAGE_FETCHED);
+  // BUG_ON(!pte_fetched(__pte(pgprot_val(prot))));
   return __pte(
         (pgid << PFA_PGID_SHIFT) |
         (pgprot_val(prot) << PFA_PROT_SHIFT) |

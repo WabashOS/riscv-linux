@@ -62,6 +62,7 @@
 #include <linux/kcov.h>
 #include <linux/random.h>
 #include <linux/rcuwait.h>
+#include <linux/pfa.h>
 
 #include <linux/uaccess.h>
 #include <asm/unistd.h>
@@ -549,6 +550,7 @@ static void exit_mm(void)
 	BUG_ON(mm != current->active_mm);
 	/* more a memory barrier than a real lock */
 	task_lock(current);
+
 	current->mm = NULL;
 	up_read(&mm->mmap_sem);
 	enter_lazy_tlb(mm, current);
@@ -788,6 +790,14 @@ void __noreturn do_exit(long code)
 		panic("Aiee, killing interrupt handler!");
 	if (unlikely(!tsk->pid))
 		panic("Attempted to kill the idle task!");
+
+#ifdef USE_PFA
+  if(current == pfa_get_tsk()) {
+    printk("Draining newq before exiting\n");
+    pfa_drain_newq();
+    printk("Done\n");
+  }
+#endif
 
 	/*
 	 * If do_exit is called because this processes oopsed, it's possible

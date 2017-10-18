@@ -1204,9 +1204,31 @@ again:
 		if (pte_none(ptent))
 			continue;
 
+#ifdef USE_PFA
+    /* This is not a complete solution, but it reduces the number of errors */
+    if (pte_remote(ptent)) {
+      set_pte(pte, swp_entry_to_pte(pfa_remote_to_swp(ptent)));
+      ptent = *pte;
+      pfa_trace("Dropping remote page: vaddr=%lx pte=%llx\n", addr, pte_val(ptent));
+    }
+#endif
+    
 		if (pte_present(ptent)) {
 			struct page *page;
-
+#ifdef USE_PFA
+    if (pte_fetched(ptent)) {
+      pfa_trace("fetched page during unmap_vmas\n");
+      /* XXX PFA this is a horrible hack. It just masks the error.
+       * Best-case scenario: we leak these pages.
+       * Worst-case: ???  
+       * The real problem is that remote pages are being fetched after the mm
+       * is destroyed. This only happens with the PFA enabled (normal operation
+       * does not fault on these pages). I have no idea why. */
+      ptent = pte_clear_fetched(ptent);
+      *pte = ptent;
+      continue;
+    }
+#endif
 			page = vm_normal_page(vma, addr, ptent);
 			if (unlikely(details) && page) {
 				/*
@@ -1249,11 +1271,6 @@ again:
 			continue;
 
 #ifdef USE_PFA
-    /* This is not a complete solution, but it reduces the number of errors */
-    if (current == pfa_get_tsk() && pte_remote(ptent)) {
-      set_pte(pte, swp_entry_to_pte(pfa_remote_to_swp(ptent)));
-      ptent = *pte;
-    }
 #endif
 
     entry = pte_to_swp_entry(ptent);
@@ -3733,8 +3750,16 @@ static int handle_pte_fault(struct vm_fault *vmf)
 	}
   
 #ifdef USE_PFA
-  if(current == pfa_get_tsk() && pte_remote(vmf->orig_pte))
-    return pfa_handle_fault(vmf);
+  if(current == pfa_get_tsk()) {
+    if(pte_remote(vmf->orig_pte)) {
+      return pfa_handle_fault(vmf);
+    } else if (pte_fetched(vmf->orig_pte)) {
+      /* This page hasn't been bookkeeped yet, process it before doing rest of
+       * fault handling */
+      pfa_drain_newq();
+      vmf->orig_pte = *vmf->pte;
+    }
+  }
 #endif
 
 	if (!pte_present(vmf->orig_pte))

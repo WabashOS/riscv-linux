@@ -257,6 +257,21 @@ static inline int pte_remote(pte_t pte)
            (pte_val(pte) & _PAGE_REMOTE));
 }
 
+static inline int pte_fetched(pte_t pte)
+{
+  return pte_val(pte) & _PAGE_FETCHED;
+}
+
+static inline pte_t pte_mk_fetched(pte_t pte)
+{
+  return __pte(pte_val(pte) | _PAGE_FETCHED);
+}
+
+static inline pte_t pte_clear_fetched(pte_t pte)
+{
+  return __pte(pte_val(pte) & ~(_PAGE_FETCHED));
+}
+
 /* static inline pte_t pte_rdprotect(pte_t pte) */
 
 static inline pte_t pte_wrprotect(pte_t pte)

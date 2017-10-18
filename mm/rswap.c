@@ -247,6 +247,13 @@ static void rswap_frontswap_invalidate_page(unsigned type, pgoff_t offset)
 
   rpage = rhashtable_lookup_fast(&page_ht, &offset, htparams);
 
+#ifdef USE_PFA
+  /* it's possible that Linux will try to invalidate PFA pages for pfa_tsk from
+   * some different task (while destroying pfa_tsk). We just ignore these. */
+  if(!rpage)
+    return;
+#endif
+
 #ifdef RSWAP_DEBUG
   /* page not in page_ht anymore, return */
   if (unlikely(!rpage)) {

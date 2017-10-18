@@ -150,7 +150,6 @@ static void pfa_new(void)
 
   pgd_t *pgd;
   p4d_t *p4d;
-  pte_t real_orig_pte; /* vmf.orig_pte is actually the swp_entry_t */
 
 #ifdef PFA_DEBUG
   BUG_ON(readq(pfa_io_newstat) == 0);
@@ -166,6 +165,9 @@ static void pfa_new(void)
   BUG_ON(pfa_tsk == NULL);
   mm = pfa_tsk->mm;
   
+  if(!mm) {
+    panic("Trying to bookkeep PFA without an mm\n");
+  }
   vmf.vma = find_vma(mm, vmf.address);
   BUG_ON(!vmf.vma);
   /* The actual check in do_page_fault is more complicated than this
@@ -191,8 +193,8 @@ static void pfa_new(void)
   BUG_ON(pte_none(vmf.orig_pte));
 
   /* Put the swap entry back into the PTE so we can use the unmodified
-   * do_swap_page */
-  real_orig_pte = vmf.orig_pte;
+   * do_swap_page 
+   * NOTE: this clears _PAGE_FETCHED as well */
   vmf.orig_pte = swp_entry_to_pte(entry);
 	set_pte_at(mm, vmf.address, vmf.pte, vmf.orig_pte);
 
@@ -256,12 +258,12 @@ int pfa_handle_fault(struct vm_fault *vmf)
   
   /* Probably don't need this anymore since we pro-actively drain newq on
    * every page fault early on (in do_page_fault) */
-  /* if(readq(pfa_io_newstat) == PFA_NEW_MAX) { */
-  /*   #<{(| NewQ Full |)}># */
-  /*   pfa_trace("NewQ full!\n"); */
-  /*   pfa_drain_newq(); */
-  /*   pfa_trace("Drained NewQ\n"); */
-  /* } */
+  if(pfa_nnew() == PFA_NEW_MAX) {
+    /* NewQ Full */
+    pfa_trace("NewQ full!\n");
+    pfa_drain_newq();
+    pfa_trace("Drained NewQ\n");
+  }
 
   return 0;
 }
