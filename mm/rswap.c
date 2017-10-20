@@ -146,15 +146,13 @@ static int rswap_frontswap_store(unsigned type, pgoff_t offset,
   int cpu;
 
 #ifdef USE_PFA
-  if(current == pfa_get_tsk()) {
-    int mapcount = atomic_read(&(page->_mapcount));
-    if(mapcount > 1) {
-      printk("Page mapped %d times\n", mapcount);
-    }
-
-    /* for PFA, we actually store the page during try_to_unmap_one */
-    return 0;
+  int mapcount = atomic_read(&(page->_mapcount));
+  if(mapcount > 1) {
+    printk("Page mapped %d times\n", mapcount);
   }
+
+  /* for PFA, we actually store the page during try_to_unmap_one */
+  return 0;
 #endif
 
   created_rpage = false;
@@ -208,9 +206,7 @@ static int rswap_frontswap_load(unsigned type, pgoff_t offset,
 
 #ifdef USE_PFA
   /* When using the PFA, the page data was already fetched. Do nothing here.*/
-  if(current == pfa_get_tsk()) {
-    return 0;
-  }
+  return 0;
 #endif
 
   /* find page */
@@ -241,18 +237,10 @@ static void rswap_frontswap_invalidate_page(unsigned type, pgoff_t offset)
 #ifdef USE_PFA
   /* Hopefully it's OK to never invalidate stuff? I'm not even sure what that
    * would really mean... */
-  if(current == pfa_get_tsk())
-    return;
+  return;
 #endif
 
   rpage = rhashtable_lookup_fast(&page_ht, &offset, htparams);
-
-#ifdef USE_PFA
-  /* it's possible that Linux will try to invalidate PFA pages for pfa_tsk from
-   * some different task (while destroying pfa_tsk). We just ignore these. */
-  if(!rpage)
-    return;
-#endif
 
 #ifdef RSWAP_DEBUG
   /* page not in page_ht anymore, return */
@@ -274,8 +262,7 @@ static void rswap_frontswap_invalidate_page(unsigned type, pgoff_t offset)
 static void rswap_frontswap_invalidate_area(unsigned type)
 {
 #ifdef USE_PFA
-  if(current == pfa_get_tsk())
-    return;
+  return;
 #endif
   pr_err("rswap_frontswap_invalidate_area\n");
 }

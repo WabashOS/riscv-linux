@@ -793,9 +793,10 @@ void __noreturn do_exit(long code)
 
 #ifdef USE_PFA
   if(current == pfa_get_tsk()) {
-    printk("Draining newq before exiting\n");
-    pfa_drain_newq();
-    printk("Done\n");
+    /* De-register this task from the pfa */
+    down_read(&tsk->mm->mmap_sem);
+    pfa_clear_tsk();
+    up_read(&tsk->mm->mmap_sem);
   }
 #endif
 

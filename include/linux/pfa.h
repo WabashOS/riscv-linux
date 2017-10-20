@@ -5,6 +5,7 @@
 #include <asm/pgtable.h>
 #include <linux/swap.h>
 #include <linux/swapops.h>
+#include <linux/mutex.h>
 
 /* The PFA can only work for one task at a time right now. 
  * NULL if no one has registered with the PFA. */
@@ -21,8 +22,8 @@ extern struct task_struct *pfa_tsk;
 #define PFA_PROT_SHIFT  2
 
 /* Use this for noisy messages you might want to turn off */
-// #define pfa_trace(M, ...) printk("PFA_TRACE: " M, ##__VA_ARGS__)
-#define pfa_trace(M, ...) 
+#define pfa_trace(M, ...) printk("PFA_TRACE: " M, ##__VA_ARGS__)
+// #define pfa_trace(M, ...) 
 
 /* pgid is a compressed form of swp_entry_t. It assumes that type=0 and then
  * just uses the offset as pgid */
@@ -32,6 +33,40 @@ typedef uint32_t pfa_pgid_t;
 #define PFA_PGID_BITS 28 
 /* Location of PGID in an eviction value (defined in pfa_spec) */
 #define PFA_EVICT_PGID_SHIFT 36
+
+/* Protects access to PFA (callers of sensitive PFA functions need to acquire
+ * this before calling).
+ * NOTE: Often held with mm->mmap_sem. To avoid deadlock, If you need mmap_sem,
+ * always down it before locking pfa_mutex. */
+extern struct mutex pfa_mutex;
+
+/* Macros here mostly to make it easier to track locking behavior */
+// #define pfa_trace_locks(M, ...) printk("PFA_TRACE_LOCKS: " M, ##__VA_ARGS__)
+#define pfa_trace_locks(M, ...) 
+
+#define pfa_lock() do { \
+  pfa_trace_locks("Locking PFA: %s:%d\n", __FILE__, __LINE__); \
+  mutex_lock(&pfa_mutex); \
+  pfa_trace_locks("Got it!\n"); \
+} while(0)
+
+static inline int __pfa_trylock(const char *file, int line) {
+  int res = mutex_trylock(&pfa_mutex);
+  if(res)
+    pfa_trace_locks("Locking PFA: %s:%d\n", file, line);
+  else
+    pfa_trace_locks("Failed to Lock PFA: %s:%d\n", file, line);
+
+  return res;
+}
+#define pfa_trylock() __pfa_trylock(__FILE__, __LINE__)
+
+#define pfa_unlock() do { \
+  mutex_unlock(&pfa_mutex); \
+  pfa_trace_locks("Unlocked PFA: %s:%d\n", __FILE__, __LINE__); \
+} while(0)
+
+#define pfa_assert_lock() BUG_ON(!mutex_is_locked(&pfa_mutex))
 
 static inline uint64_t get_cycle(void)
 {
@@ -46,20 +81,19 @@ void pfa_init(void);
 /* Evict a page to the pfa. */
 void pfa_evict(swp_entry_t swp_ent, uintptr_t page_paddr, uintptr_t vaddr);
 
-/* Add the frame at pfn to the list of free frames for the pfa.
- * pfn - the page frame number to be added 
- */
-void pfa_free(struct page *pg);
-
 int64_t pfa_nnew(void);
 
-/* Fetch and report every newpage from PFA */
+/* Fetch and report every newpage from PFA.
+ * Caller must down pfa_tsk->mm->mmap_sem
+ * Caller must hold pfa_lock */
 void pfa_drain_newq(void);
 
-/* Provides enough free frames to the PFA to fill it's queues */
+/* Provides enough free frames to the PFA to fill it's queues
+ * Caller must hold pfa_lock */
 void pfa_fill_freeq(void);
 
-/* Handle a page fault due to PFA error (remote bit set in PTE) */
+/* Handle a page fault due to PFA error (remote bit set in PTE)
+ * Caller must down pfa_tsk->mm->mmap_sem */
 int pfa_handle_fault(struct vm_fault *vmf);
 
 /* Translate any virtual address to it's physical address 
@@ -122,10 +156,16 @@ static inline swp_entry_t pfa_remote_to_swp(pte_t ptep)
 void pfa_frameq_push(struct page *frame);
 struct page* pfa_frameq_pop(void);
 
-/* Searches the frameq for paddr. Returns 1 if found, 0 otherwise */
+/* Searches the frameq for paddr. Returns 1 if found, 0 otherwise.
+ * This isn't super thread-safe, but it won't corrupt anything (it might cause
+ * a crash under certain races) */
 int pfa_frameq_search(uintptr_t paddr);
 
 void pfa_set_tsk(struct task_struct *tsk);
+
+/* Must down pfa_tsk->mm->mmap_sem before calling */
+void pfa_clear_tsk(void);
+
 static inline struct task_struct *pfa_get_tsk(void) { return pfa_tsk; }
 
 #endif

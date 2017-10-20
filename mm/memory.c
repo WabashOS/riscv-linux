@@ -1205,11 +1205,13 @@ again:
 			continue;
 
 #ifdef USE_PFA
-    /* This is not a complete solution, but it reduces the number of errors */
+    /* This is not a complete solution, but it reduces the number of errors 
+     * NOTE: we can't check for pfa_tsk here because it's already been cleaned
+     * up (in do_exit). */
     if (pte_remote(ptent)) {
       set_pte(pte, swp_entry_to_pte(pfa_remote_to_swp(ptent)));
       ptent = *pte;
-      pfa_trace("Dropping remote page: vaddr=%lx pte=%llx\n", addr, pte_val(ptent));
+      pfa_trace("Dropping remote page: vaddr=%lx pte=%lx\n", addr, pte_val(ptent));
     }
 #endif
     
@@ -3750,16 +3752,27 @@ static int handle_pte_fault(struct vm_fault *vmf)
 	}
   
 #ifdef USE_PFA
-  if(current == pfa_get_tsk()) {
+  /* I'd be surprised if a task other than pfa_tsk faulted on a remote page,
+   * but all the pfa_* functions should work anyway (as long as pfa_tsk exists) 
+   */
     if(pte_remote(vmf->orig_pte)) {
       return pfa_handle_fault(vmf);
     } else if (pte_fetched(vmf->orig_pte)) {
       /* This page hasn't been bookkeeped yet, process it before doing rest of
        * fault handling */
-      pfa_drain_newq();
-      vmf->orig_pte = *vmf->pte;
+      pfa_lock();
+      if(!pfa_get_tsk()) {
+        /* fetched pte got missed during process exit somehow... 
+         * See comment in zap_pte_range for details */
+        pfa_trace("Page fault on fetched page after PFA exit\n");
+        *vmf->pte = pte_clear_fetched(vmf->orig_pte);
+        vmf->orig_pte = *vmf->pte;
+      } else {
+        pfa_drain_newq();
+        vmf->orig_pte = *vmf->pte;
+      }
+      pfa_unlock();
     }
-  }
 #endif
 
 	if (!pte_present(vmf->orig_pte))

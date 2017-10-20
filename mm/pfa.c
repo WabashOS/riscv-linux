@@ -2,6 +2,8 @@
 #include <linux/pfa.h>
 #include <linux/io.h>
 #include <linux/gfp.h>
+#include <linux/kthread.h>
+#include <linux/delay.h>
 #include "internal.h"
 
 /* Phyiscal addr for MMIO to pfa */
@@ -18,6 +20,8 @@
 #define PFA_FREE_MAX 64
 #define PFA_NEW_MAX PFA_FREE_MAX
 #define PFA_EVICT_MAX 1
+
+DEFINE_MUTEX(pfa_mutex);
 
 /* Global var. See pfa.h for details */
 struct task_struct *pfa_tsk;
@@ -38,8 +42,20 @@ int pfa_frameq_tail = 0;
 int pfa_frameq_size = 0;
 struct page* pfa_frameq[PFA_FRAMEQ_MAX] = {NULL};
 
+/* kpfad settings */
+struct task_struct *kpfad_tsk = NULL;
+atomic64_t kpfad_sleeptime = ATOMIC_INIT(10000); /* how long to sleep (in us)*/
+/* How flexible (in us) to be in re-scheduling */
+#define KPFAD_SLEEP_FLEX 5000
+
 /* Local Functions */
-void pfa_fill_freeq(void);
+/* Add the frame at pfn to the list of free frames for the pfa.
+ * pfn - the page frame number to be added 
+ */
+static void pfa_free(struct page *pg);
+
+/* PFA management daemon. Mostly drains newq and fills freeq. */
+static int kpfad(void *p);
 
 void pfa_init(void)
 {
@@ -74,7 +90,7 @@ void pfa_evict(swp_entry_t swp_ent, uintptr_t page_paddr, uintptr_t vaddr)
   /* I'm not sure if this is possible in Linux, but free frames may end up on
    * the lru lists and get re-selected for eviction. */
   if(pfa_frameq_search(page_paddr)) {
-      panic("evicting frame on frameq: paddr=%lx\n", page_paddr);
+      panic("Evicting frame on frameq: paddr=%lx\n", page_paddr);
   }
 
   /* The PFA will get right-screwy if we evict shared pages. Who knows what
@@ -100,7 +116,7 @@ void pfa_evict(swp_entry_t swp_ent, uintptr_t page_paddr, uintptr_t vaddr)
 /* Add the frame at pfn to the list of free frames for the pfa.
  * pfn - the page frame number to be added 
  */
-void pfa_free(struct page* pg)
+static void pfa_free(struct page* pg)
 {
   pfa_trace("Adding 0x%llx to freelist (mapcount %d)\n", page_to_phys(pg), page_mapcount(pg));
   writeq(page_to_phys(pg), pfa_io_free);
@@ -111,25 +127,6 @@ int64_t pfa_nnew(void)
 {
   return readq(pfa_io_newstat);
 }
-
-#if 0
-/* This version drains the newq but doesn't do anything.
- * useful for testing */
-void pfa_new(void)
-{
-  void *vaddr = NULL;
-  pfa_pgid_t pgid = 0;
-  struct page* frame;
-
-  BUG_ON(readq(pfa_io_newstat) == 0);
-  vaddr = (void*)readq(pfa_io_newvaddr);
-  pgid = readq(pfa_io_newpgid);
-  frame = pfa_frameq_pop();
-
-  printk("New Page: pgid=%d, vaddr=%p\n", pgid, vaddr);
-  return;
-}
-#endif
 
 /* Process one entry from the newq.
  * Assumes there is at least one entry in newq (check NEWSTAT first). 
@@ -164,10 +161,8 @@ static void pfa_new(void)
 
   BUG_ON(pfa_tsk == NULL);
   mm = pfa_tsk->mm;
+  BUG_ON(!mm);
   
-  if(!mm) {
-    panic("Trying to bookkeep PFA without an mm\n");
-  }
   vmf.vma = find_vma(mm, vmf.address);
   BUG_ON(!vmf.vma);
   /* The actual check in do_page_fault is more complicated than this
@@ -206,7 +201,11 @@ static void pfa_new(void)
 
 void pfa_drain_newq(void)
 {
-  uint64_t nnew = readq(pfa_io_newstat);
+  uint64_t nnew;
+
+  pfa_assert_lock();
+
+  nnew = readq(pfa_io_newstat);
   if(nnew) 
     pfa_trace("Draining %lld items from newq\n", nnew);
 
@@ -220,8 +219,9 @@ void pfa_drain_newq(void)
 void pfa_fill_freeq(void)
 {
   struct page* pg;
-
   uint64_t nframe;
+  
+  pfa_assert_lock();
   
   nframe = readq(pfa_io_freestat);
 
@@ -249,6 +249,14 @@ int pfa_handle_fault(struct vm_fault *vmf)
   pfa_trace("Page fault received on remote page (vaddr=0x%lx)\n",
       vmf->address & PAGE_MASK);
 
+  /* Note: we must already hold mm->mmap_sem or we could deadlock with kpfad */
+  pfa_lock();
+
+  if(!pfa_get_tsk()) {
+    pfa_trace("Page fault on remote page after PFA exited\n");
+    return VM_FAULT_SIGBUS;
+  }
+
   if(readq(pfa_io_freestat) == PFA_FREE_MAX) {
     /* FreeQ Empty */
     pfa_trace("FreeQ Empty!\n");
@@ -265,12 +273,14 @@ int pfa_handle_fault(struct vm_fault *vmf)
     pfa_trace("Drained NewQ\n");
   }
 
+  pfa_unlock();
   return 0;
 }
 
 void pfa_frameq_push(struct page *frame)
 {
   BUG_ON(pfa_frameq_size == PFA_FRAMEQ_MAX);
+  pfa_assert_lock();
 
 #ifdef PFA_DEBUG
   BUG_ON(pfa_frameq_search(page_to_phys(frame)));
@@ -289,6 +299,8 @@ struct page* pfa_frameq_pop(void)
   struct page *ret;
 
   BUG_ON(pfa_frameq_size == 0);
+  pfa_assert_lock();
+  
   ret = pfa_frameq[pfa_frameq_tail];
   BUG_ON(ret == NULL);
   
@@ -303,6 +315,8 @@ struct page* pfa_frameq_pop(void)
 int pfa_frameq_search(uintptr_t paddr)
 {
   int i;
+  
+  /* pfa_assert_lock(); */
   for(i = pfa_frameq_tail; i != pfa_frameq_head; i = (i + 1) % PFA_FRAMEQ_MAX)
   {
     if(pfa_frameq[i] == NULL) {
@@ -322,6 +336,53 @@ void pfa_set_tsk(struct task_struct *tsk)
     panic("Resetting the pfa_tsk not currently supported\n");
   }
   pfa_tsk = tsk;
+  kpfad_tsk = kthread_run(kpfad, NULL, "kpfad");
   return;
 }
 
+void pfa_clear_tsk(void)
+{
+  pfa_trace("De-registering pfa task\n");
+  
+  /* Can't hold pfa_lock because kthread_stop blocks until kpfad_tsk exits. */
+  kthread_stop(kpfad_tsk);
+
+  pfa_lock();
+
+  pfa_drain_newq();
+  pfa_tsk = NULL;
+
+  pfa_unlock();
+
+  /* In practice, I should also free the frames in pfa_frameq */
+  return;
+}
+
+/* PFA management daemon. Mostly drains newq and fills freeq. */
+static int kpfad(void *p)
+{
+
+  while(1) {
+    pfa_trace("kpfad running\n");
+
+    if (kthread_should_stop())
+      break;
+
+    /* NOTE: Lock acquisition order matters here */
+    down_read(&pfa_tsk->mm->mmap_sem);
+    /* Not a big deal if we can't get the pfa_lock, just try again later */
+    if(pfa_trylock()) {
+      BUG_ON(!pfa_get_tsk());
+      pfa_fill_freeq();
+      pfa_drain_newq();
+      pfa_unlock();
+    }
+    up_read(&pfa_tsk->mm->mmap_sem);
+    pfa_trace("kpfad done\n");
+
+    usleep_range(5000, 15000);
+  }
+
+  pfa_trace("kpfad exiting\n");
+  return 0;
+}
