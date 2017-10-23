@@ -270,6 +270,7 @@ static void rswap_frontswap_invalidate_area(unsigned type)
 static void rswap_frontswap_init(unsigned type)
 {
   init_rswap_pages(REMOTE_BUF_SIZE);
+
 #ifdef USE_PFA
   pfa_init();
 #endif
@@ -308,8 +309,6 @@ static int __init init_rswap(void)
   frontswap_register_ops(&rswap_frontswap_ops);
   if (rswap_init_debugfs())
     pr_err("rswap debugfs failed\n");
-
-  pfa_init();
 
   pr_info("rswap module loaded\n");
   return 0;
