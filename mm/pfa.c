@@ -94,7 +94,7 @@ void pfa_evict(swp_entry_t swp_ent, uintptr_t page_paddr, uintptr_t vaddr)
   int mapcount;
 
   /* Evict Page */
-  pfa_trace("Evicting page (vaddr=0x%lx paddr=0x%lx pgid=%d)\n",
+  pfa_trace("Evicting page (vaddr=0x%lx) (paddr=0x%lx) (pgid=%d)\n",
       vaddr,
       page_paddr,
       pfa_swp_to_pgid(swp_ent));
@@ -103,14 +103,14 @@ void pfa_evict(swp_entry_t swp_ent, uintptr_t page_paddr, uintptr_t vaddr)
   /* I'm not sure if this is possible in Linux, but free frames may end up on
    * the lru lists and get re-selected for eviction. */
   if(pfa_frameq_search(page_paddr)) {
-      panic("Evicting frame on frameq: paddr=%lx\n", page_paddr);
+      panic("Evicting frame on frameq: (paddr=0x%lx)\n", page_paddr);
   }
 
   /* The PFA will get right-screwy if we evict shared pages. Who knows what
    * chaos might ensue if that happens! */
   mapcount = page_mapcount(phys_to_page(page_paddr));
   if(mapcount > 1) {
-    panic("Page (paddr 0x%lx) shared %d times (sharing not supported in pfa)\n",
+    panic("Page (paddr=0x%lx) shared %d times (sharing not supported in pfa)\n",
         page_paddr, mapcount);
   }
 #endif
@@ -131,7 +131,7 @@ void pfa_evict(swp_entry_t swp_ent, uintptr_t page_paddr, uintptr_t vaddr)
  */
 static void pfa_free(struct page* pg)
 {
-  pfa_trace("Adding 0x%llx to freelist (mapcount %d)\n", page_to_phys(pg), page_mapcount(pg));
+  pfa_trace("Adding (paddr=0x%lx) to freelist\n", (unsigned long)page_to_phys(pg));
   writeq(page_to_phys(pg), pfa_io_free);
   pfa_frameq_push(pg);
 }
@@ -168,7 +168,7 @@ static void pfa_new(void)
   /* Get the new page info from newq and frameq */
   vmf.address = readq(pfa_io_newvaddr) & PAGE_MASK;
   new_pgid = (pfa_pgid_t)readq(pfa_io_newpgid);
-  pfa_trace("Fetching New Page: id=%d\n", new_pgid);
+  pfa_trace("Fetching New Page: (pgid=%d)\n", new_pgid);
   
   entry = pfa_pgid_to_swp(new_pgid);
 
@@ -292,8 +292,8 @@ int pfa_handle_fault(struct vm_fault *vmf)
 
 void pfa_frameq_push(struct page *frame)
 {
-  BUG_ON(pfa_frameq_size == PFA_FRAMEQ_MAX);
   pfa_assert_lock();
+  BUG_ON(pfa_frameq_size == PFA_FRAMEQ_MAX);
 
 #ifdef PFA_DEBUG
   BUG_ON(pfa_frameq_search(page_to_phys(frame)));
@@ -311,8 +311,8 @@ struct page* pfa_frameq_pop(void)
 {
   struct page *ret;
 
-  BUG_ON(pfa_frameq_size == 0);
   pfa_assert_lock();
+  BUG_ON(pfa_frameq_size == 0);
   
   ret = pfa_frameq[pfa_frameq_tail];
   BUG_ON(ret == NULL);
@@ -346,8 +346,9 @@ int pfa_frameq_search(uintptr_t paddr)
 void pfa_set_tsk(struct task_struct *tsk)
 {
   if(pfa_tsk != NULL) {
-    panic("Resetting the pfa_tsk not currently supported\n");
+    panic("Calling pfa_set_tsk after it's already set (call pfa_clear_tsk first!)\n");
   }
+  pfa_trace("Setting (pid=%d) as pfa_task\n", task_tgid_vnr(tsk));
   pfa_tsk = tsk;
   kpfad_tsk = kthread_run(kpfad, NULL, "kpfad");
   return;
@@ -364,6 +365,9 @@ void pfa_clear_tsk(void)
 
   pfa_drain_newq();
   pfa_tsk = NULL;
+
+  /* XXX PFA I'm not sure this is needed */
+  flush_tlb_all();
 
   pfa_unlock();
 

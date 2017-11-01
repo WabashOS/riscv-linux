@@ -15,7 +15,6 @@ SYSCALL_DEFINE0(pfa)
 #ifndef USE_PFA
   printk("pfa syscall: PFA not enabled, doing nothing.\n");
 #else
-  printk("Registering %d with pfa\n", task_tgid_vnr(current));
   pfa_set_tsk(current);
 #endif
 

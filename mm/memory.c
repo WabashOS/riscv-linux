@@ -1211,25 +1211,17 @@ again:
     if (pte_remote(ptent)) {
       set_pte(pte, swp_entry_to_pte(pfa_remote_to_swp(ptent)));
       ptent = *pte;
-      pfa_trace("Dropping remote page: vaddr=%lx pte=%lx\n", addr, pte_val(ptent));
+      pfa_trace("Dropping remote page: (vaddr=0x%lx) (pte=0x%lx)\n", addr, pte_val(ptent));
     }
 #endif
     
 		if (pte_present(ptent)) {
 			struct page *page;
 #ifdef USE_PFA
-    if (pte_fetched(ptent)) {
-      pfa_trace("fetched page during unmap_vmas\n");
-      /* XXX PFA this is a horrible hack. It just masks the error.
-       * Best-case scenario: we leak these pages.
-       * Worst-case: ???  
-       * The real problem is that remote pages are being fetched after the mm
-       * is destroyed. This only happens with the PFA enabled (normal operation
-       * does not fault on these pages). I have no idea why. */
-      ptent = pte_clear_fetched(ptent);
-      *pte = ptent;
-      continue;
-    }
+      if (unlikely(pte_fetched(ptent))) {
+        panic("Seeing fetched page after process shutdown. (possible causes"
+          "include shared pages or multiple PIDs sharing the pfa)\n");
+      }
 #endif
 			page = vm_normal_page(vma, addr, ptent);
 			if (unlikely(details) && page) {
@@ -1273,6 +1265,9 @@ again:
 			continue;
 
 #ifdef USE_PFA
+    BUG_ON(pte_val(ptent) != pte_val(*pte));
+    BUG_ON(pte_remote(ptent));
+    BUG_ON(pte_present(ptent) && pte_fetched(ptent));
 #endif
 
     entry = pte_to_swp_entry(ptent);
@@ -3762,11 +3757,8 @@ static int handle_pte_fault(struct vm_fault *vmf)
        * fault handling */
       pfa_lock();
       if(!pfa_get_tsk()) {
-        /* fetched pte got missed during process exit somehow... 
-         * See comment in zap_pte_range for details */
-        pfa_trace("Page fault on fetched page after PFA exit\n");
-        *vmf->pte = pte_clear_fetched(vmf->orig_pte);
-        vmf->orig_pte = *vmf->pte;
+        panic("Seeing fetched page after process shutdown. (possible causes"
+          "include shared pages or multiple PIDs sharing the pfa)\n");
       } else {
         pfa_drain_newq();
         vmf->orig_pte = *vmf->pte;

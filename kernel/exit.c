@@ -793,7 +793,8 @@ void __noreturn do_exit(long code)
 
 #ifdef USE_PFA
   if(current == pfa_get_tsk()) {
-    /* De-register this task from the pfa */
+    /* De-register this task from the pfa
+     * This also cleans up PFA state */
     down_read(&tsk->mm->mmap_sem);
     pfa_clear_tsk();
     up_read(&tsk->mm->mmap_sem);
