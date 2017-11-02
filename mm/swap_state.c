@@ -402,15 +402,10 @@ struct page *__read_swap_cache_async(swp_entry_t entry, gfp_t gfp_mask,
 		swapcache_free(entry);
 	} while (err != -ENOMEM);
 
-#ifdef USE_PFA
-  /* XXX PFA */
-  if (new_page)
-    panic("WTF???\n");
-#endif
-
 	if (new_page)
 		put_page(new_page);
-	return found_page;
+	
+  return found_page;
 }
 
 /*
