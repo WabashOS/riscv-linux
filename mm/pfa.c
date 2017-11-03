@@ -4,6 +4,7 @@
 #include <linux/gfp.h>
 #include <linux/kthread.h>
 #include <linux/delay.h>
+#include <linux/kobject.h>
 #include "internal.h"
 
 /* Phyiscal addr for MMIO to pfa */
@@ -24,6 +25,16 @@
 #define PFA_EVICT_MAX 1
 
 DEFINE_MUTEX(pfa_mutex);
+
+/* sysfs stuff */
+ssize_t pfa_sysfs_show_tsk(struct kobject *kobj,
+    struct kobj_attribute *attr, char *buf);
+static ssize_t pfa_sysfs_store_tsk(struct kobject *kobj,
+    struct kobj_attribute *attr, const char *buf, size_t count);
+
+struct kobject *pfa_sysfs_dir;
+struct kobj_attribute pfa_sysfs_tsk = __ATTR(pfa_tsk, 0660, pfa_sysfs_show_tsk, pfa_sysfs_store_tsk);
+
 
 /* Global var. See pfa.h for details */
 struct task_struct *pfa_tsk;
@@ -67,6 +78,14 @@ void pfa_init(void)
   /* Register RPFH I/O addr */
   pr_err("Linux Initializing PFA\n");
   
+  /* Create sysfs interface */
+  pfa_sysfs_dir = kobject_create_and_add("pfa", kernel_kobj);
+  if(sysfs_create_file(pfa_sysfs_dir, &pfa_sysfs_tsk.attr) != 0) {
+    /* User won't be able to use PFA, but we don't need to crash the kernel
+     * either */
+    pr_err("Failed to create sysfs entries\n");
+  }
+
   /* Setup MMIO */
   pfa_io_free = ioremap(PFA_IO_FREEFRAME, 8);
   pfa_io_freestat = ioremap(PFA_IO_FREESTAT, 8);
@@ -403,3 +422,32 @@ static int kpfad(void *p)
   pfa_trace("kpfad exiting\n");
   return 0;
 }
+
+ssize_t pfa_sysfs_show_tsk(struct kobject *kobj,
+    struct kobj_attribute *attr, char *buf)
+{
+  if(pfa_tsk) {
+    return sprintf(buf, "%d\n", task_tgid_vnr(pfa_tsk));
+  } else {
+    return sprintf(buf, "0\n");
+  }
+}
+
+static ssize_t pfa_sysfs_store_tsk(struct kobject *kobj,
+    struct kobj_attribute *attr, const char *buf, size_t count)
+{
+  pid_t pid;
+  struct task_struct *tsk = NULL;
+  if(kstrtoint(buf, 10, &pid) == 0) {
+    tsk = find_task_by_vpid(pid);
+  }
+
+  if(tsk) {
+    pfa_set_tsk(tsk);
+  } else {
+    pfa_trace("Invalid pfa_tsk pid provided\n");
+  }
+
+  return count;
+}
+
