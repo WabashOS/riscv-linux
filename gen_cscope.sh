@@ -1,4 +1,5 @@
 #!/bin/bash
+
 LNX=.
 find  $LNX                                                                \
     -path "$LNX/arch/*" -prune -o               \
