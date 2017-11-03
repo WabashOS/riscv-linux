@@ -62,6 +62,7 @@
 #include <linux/random.h>
 #include <linux/rcuwait.h>
 #include <linux/compat.h>
+#include <linux/pfa.h>
 
 #include <linux/uaccess.h>
 #include <asm/unistd.h>
@@ -775,6 +776,16 @@ void __noreturn do_exit(long code)
 		panic("Aiee, killing interrupt handler!");
 	if (unlikely(!tsk->pid))
 		panic("Attempted to kill the idle task!");
+
+#ifdef USE_PFA
+  if(current == pfa_get_tsk()) {
+    /* De-register this task from the pfa
+     * This also cleans up PFA state */
+    down_read(&tsk->mm->mmap_sem);
+    pfa_clear_tsk();
+    up_read(&tsk->mm->mmap_sem);
+  }
+#endif
 
 	/*
 	 * If do_exit is called because this processes oopsed, it's possible

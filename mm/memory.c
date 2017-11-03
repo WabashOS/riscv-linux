@@ -69,6 +69,7 @@
 #include <linux/userfaultfd_k.h>
 #include <linux/dax.h>
 #include <linux/oom.h>
+#include <linux/pfa.h>
 
 #include <asm/io.h>
 #include <asm/mmu_context.h>
@@ -1233,9 +1234,25 @@ again:
 		if (pte_none(ptent))
 			continue;
 
+#ifdef USE_PFA
+    /* This is not a complete solution, but it reduces the number of errors 
+     * NOTE: we can't check for pfa_tsk here because it's already been cleaned
+     * up (in do_exit). */
+    if (pte_remote(ptent)) {
+      set_pte(pte, swp_entry_to_pte(pfa_remote_to_swp(ptent)));
+      ptent = *pte;
+      pfa_trace("Dropping remote page: (vaddr=0x%lx) (pte=0x%lx)\n", addr, pte_val(ptent));
+    }
+#endif
+    
 		if (pte_present(ptent)) {
 			struct page *page;
-
+#ifdef USE_PFA
+      if (unlikely(pte_fetched(ptent))) {
+        panic("Seeing fetched page after process shutdown. (possible causes"
+          "include shared pages or multiple PIDs sharing the pfa)\n");
+      }
+#endif
 			page = vm_normal_page(vma, addr, ptent);
 			if (unlikely(details) && page) {
 				/*
@@ -1276,6 +1293,12 @@ again:
 		/* If details->check_mapping, we leave swap entries. */
 		if (unlikely(details))
 			continue;
+
+#ifdef USE_PFA
+    BUG_ON(pte_val(ptent) != pte_val(*pte));
+    BUG_ON(pte_remote(ptent));
+    BUG_ON(pte_present(ptent) && pte_fetched(ptent));
+#endif
 
 		entry = pte_to_swp_entry(ptent);
 		if (!non_swap_entry(entry))
@@ -3750,6 +3773,27 @@ static int handle_pte_fault(struct vm_fault *vmf)
 		else
 			return do_fault(vmf);
 	}
+  
+#ifdef USE_PFA
+  /* I'd be surprised if a task other than pfa_tsk faulted on a remote page,
+   * but all the pfa_* functions should work anyway (as long as pfa_tsk exists) 
+   */
+    if(pte_remote(vmf->orig_pte)) {
+      return pfa_handle_fault(vmf);
+    } else if (pte_fetched(vmf->orig_pte)) {
+      /* This page hasn't been bookkeeped yet, process it before doing rest of
+       * fault handling */
+      pfa_lock();
+      if(!pfa_get_tsk()) {
+        panic("Seeing fetched page after process shutdown. (possible causes"
+          "include shared pages or multiple PIDs sharing the pfa)\n");
+      } else {
+        pfa_drain_newq();
+        vmf->orig_pte = *vmf->pte;
+      }
+      pfa_unlock();
+    }
+#endif
 
 	if (!pte_present(vmf->orig_pte))
 		return do_swap_page(vmf);

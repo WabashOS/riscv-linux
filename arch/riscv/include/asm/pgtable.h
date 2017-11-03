@@ -205,6 +205,16 @@ static inline int pte_present(pte_t pte)
 	return (pte_val(pte) & _PAGE_PRESENT);
 }
 
+static inline pte_t pte_clear_present(pte_t pte)
+{
+	return __pte(pte_val(pte) & ~(_PAGE_PRESENT));
+}
+
+static inline pte_t pte_mk_present(pte_t pte)
+{
+	return __pte(pte_val(pte) | _PAGE_PRESENT);
+}
+
 static inline int pte_none(pte_t pte)
 {
 	return (pte_val(pte) == 0);
@@ -238,6 +248,27 @@ static inline int pte_young(pte_t pte)
 static inline int pte_special(pte_t pte)
 {
 	return pte_val(pte) & _PAGE_SPECIAL;
+}
+
+static inline int pte_remote(pte_t pte)
+{
+  return (!(pte_val(pte) & _PAGE_PRESENT) &&
+           (pte_val(pte) & _PAGE_REMOTE));
+}
+
+static inline int pte_fetched(pte_t pte)
+{
+  return pte_val(pte) & _PAGE_FETCHED;
+}
+
+static inline pte_t pte_mk_fetched(pte_t pte)
+{
+  return __pte(pte_val(pte) | _PAGE_FETCHED);
+}
+
+static inline pte_t pte_clear_fetched(pte_t pte)
+{
+  return __pte(pte_val(pte) & ~(_PAGE_FETCHED));
 }
 
 /* static inline pte_t pte_rdprotect(pte_t pte) */
