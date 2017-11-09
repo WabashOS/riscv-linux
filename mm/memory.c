@@ -3788,6 +3788,7 @@ static int handle_pte_fault(struct vm_fault *vmf)
         panic("Seeing fetched page after process shutdown. (possible causes"
           "include shared pages or multiple PIDs sharing the pfa)\n");
       } else {
+        pfa_stat_add(n_early_newq, 1, current);
         pfa_drain_newq();
         vmf->orig_pte = *vmf->pte;
       }
@@ -3795,8 +3796,12 @@ static int handle_pte_fault(struct vm_fault *vmf)
     }
 #endif
 
-	if (!pte_present(vmf->orig_pte))
+	if (!pte_present(vmf->orig_pte)) {
+    uint64_t start = pfa_stat_clock();
 		return do_swap_page(vmf);
+    pfa_stat_add(t_bookkeeping, pfa_stat_clock() - start, current);
+    pfa_stat_add(n_swapfault, 1, current);
+  }
 
 	if (pte_protnone(vmf->orig_pte) && vma_is_accessible(vmf->vma))
 		return do_numa_page(vmf);

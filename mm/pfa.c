@@ -1,10 +1,12 @@
 #include <linux/mm.h>
-#include <linux/pfa.h>
 #include <linux/io.h>
 #include <linux/gfp.h>
 #include <linux/kthread.h>
 #include <linux/delay.h>
 #include <linux/kobject.h>
+#include <linux/timex.h>
+#include <linux/pfa.h>
+#include <linux/pfa_stat.h>
 #include "internal.h"
 
 /* Phyiscal addr for MMIO to pfa */
@@ -32,9 +34,7 @@ ssize_t pfa_sysfs_show_tsk(struct kobject *kobj,
 static ssize_t pfa_sysfs_store_tsk(struct kobject *kobj,
     struct kobj_attribute *attr, const char *buf, size_t count);
 
-struct kobject *pfa_sysfs_dir;
 struct kobj_attribute pfa_sysfs_tsk = __ATTR(pfa_tsk, 0660, pfa_sysfs_show_tsk, pfa_sysfs_store_tsk);
-
 
 /* Global var. See pfa.h for details */
 struct task_struct *pfa_tsk;
@@ -75,17 +75,14 @@ void pfa_init(void)
 {
   struct page *pfa_scratch;
 
-  /* Register RPFH I/O addr */
-  pr_err("Linux Initializing PFA\n");
-  
-  /* Create sysfs interface */
-  pfa_sysfs_dir = kobject_create_and_add("pfa", kernel_kobj);
-  if(sysfs_create_file(pfa_sysfs_dir, &pfa_sysfs_tsk.attr) != 0) {
-    /* User won't be able to use PFA, but we don't need to crash the kernel
-     * either */
-    pr_err("Failed to create sysfs entries\n");
-  }
+  printk("Linux Initializing PFA\n");
 
+  /* Create sysfs interface
+   * Don't fail on errors, User won't be able to use PFA, but we don't need
+   * to crash the kernel either */
+    if(sysfs_create_file(mm_kobj, &pfa_sysfs_tsk.attr) != 0)
+          pr_err("Failed to create sysfs entries\n");
+  
   /* Setup MMIO */
   pfa_io_free = ioremap(PFA_IO_FREEFRAME, 8);
   pfa_io_freestat = ioremap(PFA_IO_FREESTAT, 8);
@@ -111,6 +108,7 @@ void pfa_evict(swp_entry_t swp_ent, uintptr_t page_paddr, uintptr_t vaddr)
 {
   uint64_t evict_val;
   int mapcount;
+  uint64_t start;
 
   /* Evict Page */
   pfa_trace("Evicting page (vaddr=0x%lx) (paddr=0x%lx) (pgid=%d)\n",
@@ -139,10 +137,12 @@ void pfa_evict(swp_entry_t swp_ent, uintptr_t page_paddr, uintptr_t vaddr)
   BUG_ON(evict_val >> PFA_EVICT_PGID_SHIFT != 0);
   evict_val |= ((uint64_t)pfa_swp_to_pgid(swp_ent) << PFA_EVICT_PGID_SHIFT);
 
+  start = pfa_stat_clock();
   writeq(evict_val, pfa_io_evict);
  
   /* Wait for completion */
   while(readq(pfa_io_evictstat) < PFA_EVICT_MAX) {}
+  pfa_stat_add(t_rmem_write, pfa_stat_clock() - start, pfa_get_tsk());
 }
 
 /* Add the frame at pfn to the list of free frames for the pfa.
@@ -234,6 +234,7 @@ static void pfa_new(void)
 void pfa_drain_newq(void)
 {
   uint64_t nnew;
+  uint64_t cycles = pfa_stat_clock();
 
   pfa_assert_lock();
 
@@ -241,11 +242,14 @@ void pfa_drain_newq(void)
   if(nnew) 
     pfa_trace("Draining %lld items from newq\n", nnew);
 
+  pfa_stat_add(n_fetched, nnew, pfa_get_tsk());
   while(nnew)
   {
     pfa_new(); 
     nnew--;
   }
+
+  pfa_stat_add(t_bookkeeping, pfa_stat_clock() - cycles, pfa_tsk);
 }
 
 void pfa_fill_freeq(void)
@@ -280,6 +284,7 @@ int pfa_handle_fault(struct vm_fault *vmf)
 {
   pfa_trace("Page fault received on remote page (vaddr=0x%lx)\n",
       vmf->address & PAGE_MASK);
+  pfa_stat_add(n_pfa_fault, 1, current);
 
   /* Note: we must already hold mm->mmap_sem or we could deadlock with kpfad */
   pfa_lock();
@@ -289,23 +294,12 @@ int pfa_handle_fault(struct vm_fault *vmf)
     return VM_FAULT_SIGBUS;
   }
 
-  if(readq(pfa_io_freestat) == PFA_FREE_MAX) {
-    /* FreeQ Empty */
-    pfa_trace("FreeQ Empty!\n");
-    pfa_fill_freeq();
-    pfa_trace("Filled FreeQ\n");
-  }
-  
-  /* Probably don't need this anymore since we pro-actively drain newq on
-   * every page fault early on (in do_page_fault) */
-  if(pfa_nnew() == PFA_NEW_MAX) {
-    /* NewQ Full */
-    pfa_trace("NewQ full!\n");
-    pfa_drain_newq();
-    pfa_trace("Drained NewQ\n");
-  }
-
+  /* It's OK to call these even if their queues don't need processing */
+  pfa_fill_freeq();
+  pfa_drain_newq();
+ 
   pfa_unlock();
+
   return 0;
 }
 
@@ -369,14 +363,16 @@ void pfa_set_tsk(struct task_struct *tsk)
   }
   pfa_trace("Setting (pid=%d) as pfa_task\n", task_tgid_vnr(tsk));
   pfa_tsk = tsk;
+
   kpfad_tsk = kthread_run(kpfad, NULL, "kpfad");
+  
   return;
 }
 
 void pfa_clear_tsk(void)
 {
   pfa_trace("De-registering pfa task\n");
-  
+
   /* Can't hold pfa_lock because kthread_stop blocks until kpfad_tsk exits. */
   kthread_stop(kpfad_tsk);
 
@@ -397,8 +393,8 @@ void pfa_clear_tsk(void)
 /* PFA management daemon. Mostly drains newq and fills freeq. */
 static int kpfad(void *p)
 {
-
   while(1) {
+    uint64_t start = pfa_stat_clock();
     pfa_trace("kpfad running\n");
 
     if (kthread_should_stop())
@@ -414,8 +410,8 @@ static int kpfad(void *p)
       pfa_unlock();
     }
     up_read(&pfa_tsk->mm->mmap_sem);
-    pfa_trace("kpfad done\n");
 
+    pfa_stat_add(t_kpfad, pfa_stat_clock() - start, pfa_get_tsk());
     usleep_range(5000, 15000);
   }
 
@@ -429,7 +425,7 @@ ssize_t pfa_sysfs_show_tsk(struct kobject *kobj,
   if(pfa_tsk) {
     return sprintf(buf, "%d\n", task_tgid_vnr(pfa_tsk));
   } else {
-    return sprintf(buf, "0\n");
+    return sprintf(buf, "-1\n");
   }
 }
 

@@ -26,6 +26,7 @@
 #include <linux/perf_event.h>
 #include <linux/signal.h>
 #include <linux/uaccess.h>
+#include <linux/pfa.h>
 
 #include <asm/pgalloc.h>
 #include <asm/ptrace.h>
@@ -43,6 +44,8 @@ asmlinkage void do_page_fault(struct pt_regs *regs)
 	unsigned long addr, cause;
 	unsigned int flags = FAULT_FLAG_ALLOW_RETRY | FAULT_FLAG_KILLABLE;
 	int fault, code = SEGV_MAPERR;
+
+  pfa_stat_add(n_fault, 1, current);
 
 	cause = regs->scause;
 	addr = regs->sbadaddr;

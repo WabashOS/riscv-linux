@@ -43,7 +43,7 @@ obj-y			:= filemap.o mempool.o oom_kill.o \
 
 obj-y += init-mm.o
 
-obj-y += rswap.o pfa.o
+obj-y += rswap.o pfa.o pfa_stat.o
 
 ifdef CONFIG_NO_BOOTMEM
 	obj-y		+= nobootmem.o

@@ -1,17 +1,20 @@
-#ifndef _PFA_HELPER_H
-#define _PFA_HELPER_H
+#ifndef _PFA_H
+#define _PFA_H
 
 #include <asm/page.h>
 #include <asm/pgtable.h>
 #include <linux/swap.h>
 #include <linux/swapops.h>
 #include <linux/mutex.h>
+#include <linux/pfa_stat.h>
 
 /* The PFA can only work for one task at a time right now. 
  * NULL if no one has registered with the PFA. */
 extern struct task_struct *pfa_tsk;
 
-/* If set, linux uses PFA. Otherwise, rswap is used */
+/* If set, linux uses PFA. Otherwise, rswap is used.
+ * NOTE: This doesn't eliminate /all/ PFA changes. For example, pfa statistics
+ * will still work. */
 #define USE_PFA
 
 /* Only turn this on for extra paranoid debugging (significant performance hit) */
@@ -22,8 +25,8 @@ extern struct task_struct *pfa_tsk;
 #define PFA_PROT_SHIFT  2
 
 /* Use this for noisy messages you might want to turn off */
-#define pfa_trace(M, ...) printk("PFA_TRACE: " M, ##__VA_ARGS__)
-// #define pfa_trace(M, ...) 
+// #define pfa_trace(M, ...) printk("PFA_TRACE: " M, ##__VA_ARGS__)
+#define pfa_trace(M, ...) 
 
 /* pgid is a compressed form of swp_entry_t. It assumes that type=0 and then
  * just uses the offset as pgid */
@@ -33,6 +36,7 @@ typedef uint32_t pfa_pgid_t;
 #define PFA_PGID_BITS 28 
 /* Location of PGID in an eviction value (defined in pfa_spec) */
 #define PFA_EVICT_PGID_SHIFT 36
+
 
 /* Protects access to PFA (callers of sensitive PFA functions need to acquire
  * this before calling).
@@ -67,13 +71,6 @@ static inline int __pfa_trylock(const char *file, int line) {
 } while(0)
 
 #define pfa_assert_lock() BUG_ON(!mutex_is_locked(&pfa_mutex))
-
-static inline uint64_t get_cycle(void)
-{
-  register unsigned long __v;
-  __asm__ __volatile__ ("rdcycle %0" : "=r" (__v));
-  return __v;
-}
 
 /* initialize the system, only call once! */
 void pfa_init(void);

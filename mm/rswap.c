@@ -7,9 +7,15 @@
 #include <linux/spinlock.h>
 #include <linux/slab.h>
 #include <linux/highmem.h>
+#include <linux/delay.h>
 #include <linux/pfa.h>
+#include <linux/pfa_stat.h>
 
 #undef RSWAP_DEBUG
+
+/* Remote memory blade read/write latency to simulate (in ns) */
+#define RMEM_WRITE_LAT 1000
+#define RMEM_READ_LAT  1000
 
 #define ONEGB (1024UL*1024*1024)
 #define REMOTE_BUF_SIZE (ONEGB * 1) /* must match what server is allocating */
@@ -97,9 +103,10 @@ static struct rswap_page *get_free_rpage(void)
 /* marks the rswap_page as available, put it back on the queue */
 static void put_free_rpage(struct rswap_page *p)
 {
-  spin_lock_irq(&list_lock);
+  unsigned long flags;
+  spin_lock_irqsave(&list_lock, flags);
   list_add_tail(&(p->l_node), &page_head);
-  spin_unlock_irq(&list_lock);
+  spin_unlock_irqrestore(&list_lock, flags);
 
   debug_free_rpages++;
 }
@@ -146,13 +153,13 @@ static int rswap_frontswap_store(unsigned type, pgoff_t offset,
   int cpu;
 
 #ifdef USE_PFA
-  int mapcount = atomic_read(&(page->_mapcount));
-  if(mapcount > 1) {
-    printk("Page mapped %d times\n", mapcount);
-  }
-
   /* for PFA, we actually store the page during try_to_unmap_one */
   return 0;
+#else
+  uint64_t start = pfa_stat_clock();
+  /* In non-pfa mode, we introduce a configurable delay to simulate NW access */
+  ndelay(RMEM_WRITE_LAT);
+  pfa_stat_add(t_rmem_write, pfa_stat_clock() - start, pfa_get_tsk());
 #endif
 
   created_rpage = false;
@@ -207,6 +214,12 @@ static int rswap_frontswap_load(unsigned type, pgoff_t offset,
 #ifdef USE_PFA
   /* When using the PFA, the page data was already fetched. Do nothing here.*/
   return 0;
+#else
+  uint64_t start = pfa_stat_clock();
+  /* Simulate a NW delay in non-PFA mode */
+  ndelay(RMEM_READ_LAT);
+  pfa_stat_add(t_rmem_read, pfa_stat_clock() - start, pfa_get_tsk());
+  pfa_stat_add(n_fetched, 1, pfa_get_tsk());
 #endif
 
   /* find page */
@@ -274,6 +287,8 @@ static void rswap_frontswap_init(unsigned type)
 #ifdef USE_PFA
   pfa_init();
 #endif
+  /* This gets initialized either way to collect stats on baselines */
+  pfa_stat_init();
 
   pr_info("rswap_frontswap_init end\n");
 }
