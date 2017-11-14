@@ -305,6 +305,7 @@ extern struct cred init_cred;
 	INIT_KASAN(tsk)							\
 	INIT_LIVEPATCH(tsk)						\
 	INIT_TASK_SECURITY						\
+  .pfa_tsk_id = -1              \
 }
 
 

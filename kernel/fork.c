@@ -88,6 +88,7 @@
 #include <linux/sysctl.h>
 #include <linux/kcov.h>
 #include <linux/livepatch.h>
+#include <linux/pfa.h>
 
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
@@ -1906,6 +1907,16 @@ static __latent_entropy struct task_struct *copy_process(
 		attach_pid(p, PIDTYPE_PID);
 		nr_threads++;
 	}
+
+#ifdef CONFIG_PFA
+  /* Children of PFA-registered tasks also register with the PFA */
+  if(current->pfa_tsk_id != -1) {
+    if(!pfa_set_tsk(p)) {
+      /* If we can't set the task, better to not use PFA than to crash */
+      p->pfa_tsk_id = -1;
+    }
+  }
+#endif
 
 	total_forks++;
 	spin_unlock(&current->sighand->siglock);

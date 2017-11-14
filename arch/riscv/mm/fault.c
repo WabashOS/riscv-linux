@@ -45,7 +45,10 @@ asmlinkage void do_page_fault(struct pt_regs *regs)
 	unsigned int flags = FAULT_FLAG_ALLOW_RETRY | FAULT_FLAG_KILLABLE;
 	int fault, code = SEGV_MAPERR;
 
-  pfa_stat_add(n_fault, 1, current);
+#ifdef CONFIG_PFA
+  if(is_pfa_tsk(current))
+    pfa_stat_add(n_fault, 1);
+#endif
 
 	cause = regs->scause;
 	addr = regs->sbadaddr;
@@ -201,6 +204,8 @@ no_context:
 	pr_alert("Unable to handle kernel %s at virtual address " REG_FMT "\n",
 		(addr < PAGE_SIZE) ? "NULL pointer dereference" :
 		"paging request", addr);
+  /* XXX PFA */
+  dump_stack();
 	die(regs, "Oops");
 	do_exit(SIGKILL);
 

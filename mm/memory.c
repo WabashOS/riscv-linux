@@ -1234,7 +1234,7 @@ again:
 		if (pte_none(ptent))
 			continue;
 
-#ifdef USE_PFA
+#ifdef CONFIG_PFA
     /* This is not a complete solution, but it reduces the number of errors 
      * NOTE: we can't check for pfa_tsk here because it's already been cleaned
      * up (in do_exit). */
@@ -1247,9 +1247,9 @@ again:
     
 		if (pte_present(ptent)) {
 			struct page *page;
-#ifdef USE_PFA
+#ifdef CONFIG_PFA
       if (unlikely(pte_fetched(ptent))) {
-        panic("Seeing fetched page after process shutdown. (possible causes"
+        panic("Seeing fetched page after process shutdown. (possible causes "
           "include shared pages or multiple PIDs sharing the pfa)\n");
       }
 #endif
@@ -1294,7 +1294,7 @@ again:
 		if (unlikely(details))
 			continue;
 
-#ifdef USE_PFA
+#ifdef CONFIG_PFA
     BUG_ON(pte_val(ptent) != pte_val(*pte));
     BUG_ON(pte_remote(ptent));
     BUG_ON(pte_present(ptent) && pte_fetched(ptent));
@@ -3774,7 +3774,7 @@ static int handle_pte_fault(struct vm_fault *vmf)
 			return do_fault(vmf);
 	}
   
-#ifdef USE_PFA
+#ifdef CONFIG_PFA
   /* I'd be surprised if a task other than pfa_tsk faulted on a remote page,
    * but all the pfa_* functions should work anyway (as long as pfa_tsk exists) 
    */
@@ -3783,24 +3783,23 @@ static int handle_pte_fault(struct vm_fault *vmf)
     } else if (pte_fetched(vmf->orig_pte)) {
       /* This page hasn't been bookkeeped yet, process it before doing rest of
        * fault handling */
-      pfa_lock();
-      if(!pfa_get_tsk()) {
-        panic("Seeing fetched page after process shutdown. (possible causes"
-          "include shared pages or multiple PIDs sharing the pfa)\n");
+      pfa_lock(global);
+      if(!is_pfa_tsk(current)) {
+        panic("Seeing fetched page for non-pfa task.");
       } else {
-        pfa_stat_add(n_early_newq, 1, current);
-        pfa_drain_newq();
+        pfa_stat_add(n_early_newq, 1);
+        pfa_drain_newq(current->pfa_tsk_id);
         vmf->orig_pte = *vmf->pte;
       }
-      pfa_unlock();
+      pfa_unlock(global);
     }
 #endif
 
 	if (!pte_present(vmf->orig_pte)) {
     uint64_t start = pfa_stat_clock();
 		return do_swap_page(vmf);
-    pfa_stat_add(t_bookkeeping, pfa_stat_clock() - start, current);
-    pfa_stat_add(n_swapfault, 1, current);
+    pfa_stat_add(t_bookkeeping, pfa_stat_clock() - start);
+    pfa_stat_add(n_swapfault, 1);
   }
 
 	if (pte_protnone(vmf->orig_pte) && vma_is_accessible(vmf->vma))

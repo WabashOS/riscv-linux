@@ -10,26 +10,29 @@
 
 /* The PFA can only work for one task at a time right now. 
  * NULL if no one has registered with the PFA. */
-extern struct task_struct *pfa_tsk;
-
-/* If set, linux uses PFA. Otherwise, rswap is used.
- * NOTE: This doesn't eliminate /all/ PFA changes. For example, pfa statistics
- * will still work. */
-#define USE_PFA
+#define PFA_TASK_BITS 5
+#define PFA_MAX_TASKS (1 << PFA_TASK_BITS)
+extern struct task_struct *pfa_tsk[PFA_MAX_TASKS];
 
 /* Only turn this on for extra paranoid debugging (significant performance hit) */
 #define PFA_DEBUG
-
-/* Remote PTE */
-#define PFA_PGID_SHIFT  12
-#define PFA_PROT_SHIFT  2
 
 /* Use this for noisy messages you might want to turn off */
 // #define pfa_trace(M, ...) printk("PFA_TRACE: " M, ##__VA_ARGS__)
 #define pfa_trace(M, ...) 
 
-/* pgid is a compressed form of swp_entry_t. It assumes that type=0 and then
- * just uses the offset as pgid */
+#define pfa_warn(M, ...) printk("PFA_WARNING: " M, ##__VA_ARGS__)
+// #define pfa_warn(M, ...) 
+
+/* Remote PTE */
+#define PFA_PGID_SHIFT  12
+#define PFA_PROT_SHIFT  2
+
+/* pgid is the metadata we store in a PTE before making it remote. It contains
+ * the swap offset (we assume swp_type=0) and the pfa_tsk_id of the owner
+ * | 0000 | tsk_id (5 bits) | offset (23 bits) | */
+#define PFA_PGID_OFFSET_BITS 23
+#define PFA_PGID_TSK_BITS 5
 typedef uint32_t pfa_pgid_t;
 
 /* Maximum size of a PageID (in bits). Defined in pfa_spec. */
@@ -38,24 +41,27 @@ typedef uint32_t pfa_pgid_t;
 #define PFA_EVICT_PGID_SHIFT 36
 
 
-/* Protects access to PFA (callers of sensitive PFA functions need to acquire
+/* Global PFA lock
+ * Protects access to PFA (callers of sensitive PFA functions need to acquire
  * this before calling).
  * NOTE: Often held with mm->mmap_sem. To avoid deadlock, If you need mmap_sem,
  * always down it before locking pfa_mutex. */
-extern struct mutex pfa_mutex;
+extern struct mutex pfa_mutex_global;
+/* Only protects the evictq (and subsequent polling for completion) */
+extern struct mutex pfa_mutex_evict;
 
 /* Macros here mostly to make it easier to track locking behavior */
 // #define pfa_trace_locks(M, ...) printk("PFA_TRACE_LOCKS: " M, ##__VA_ARGS__)
 #define pfa_trace_locks(M, ...) 
 
-#define pfa_lock() do { \
+#define pfa_lock(LOCK) do { \
   pfa_trace_locks("Locking PFA: %s:%d\n", __FILE__, __LINE__); \
-  mutex_lock(&pfa_mutex); \
+  mutex_lock(&pfa_mutex_##LOCK); \
   pfa_trace_locks("Got it!\n"); \
 } while(0)
 
-static inline int __pfa_trylock(const char *file, int line) {
-  int res = mutex_trylock(&pfa_mutex);
+static inline int __pfa_trylock(const char *file, int line, struct mutex *lock) {
+  int res = mutex_trylock(lock);
   if(res)
     pfa_trace_locks("Locking PFA: %s:%d\n", file, line);
   else
@@ -63,27 +69,34 @@ static inline int __pfa_trylock(const char *file, int line) {
 
   return res;
 }
-#define pfa_trylock() __pfa_trylock(__FILE__, __LINE__)
+#define pfa_trylock(LOCK) __pfa_trylock(__FILE__, __LINE__, &pfa_mutex_##LOCK)
 
-#define pfa_unlock() do { \
-  mutex_unlock(&pfa_mutex); \
+#define pfa_unlock(LOCK) do { \
+  mutex_unlock(&pfa_mutex_##LOCK); \
   pfa_trace_locks("Unlocked PFA: %s:%d\n", __FILE__, __LINE__); \
 } while(0)
 
-#define pfa_assert_lock() BUG_ON(!mutex_is_locked(&pfa_mutex))
+/* Don't use BUG_ON(!mutex_is_locked...), it breaks in bizzare ways */
+#define pfa_assert_lock(LOCK) \
+  do { \
+    if(!mutex_is_locked(&pfa_mutex_##LOCK)) \
+      panic("pfa_assert_lock"); \
+  } while(0)
 
 /* initialize the system, only call once! */
 void pfa_init(void);
 
 /* Evict a page to the pfa. */
-void pfa_evict(swp_entry_t swp_ent, uintptr_t page_paddr, uintptr_t vaddr);
+void pfa_evict(swp_entry_t swp_ent, uintptr_t page_paddr, uintptr_t vaddr,
+    struct task_struct *tsk);
 
 int64_t pfa_nnew(void);
 
 /* Fetch and report every newpage from PFA.
- * Caller must down pfa_tsk->mm->mmap_sem
+ * mmap_sem_tsk: Caller may optionally hold exactly one mmap_sem. If it does
+ *   hold one, pass that task pfa_tsk_id here, otherwise pass -1.
  * Caller must hold pfa_lock */
-void pfa_drain_newq(void);
+void pfa_drain_newq(int mmap_sem_tsk);
 
 /* Provides enough free frames to the PFA to fill it's queues
  * Caller must hold pfa_lock */
@@ -105,8 +118,9 @@ static inline uintptr_t pfa_vaddr_to_paddr(pte_t pte, uintptr_t vaddr)
 }
 
 /* Convert a swp entry to a pfa pageID */
-static inline pfa_pgid_t pfa_swp_to_pgid(swp_entry_t ent)
+static inline pfa_pgid_t pfa_swp_to_pgid(swp_entry_t ent, int tsk_id)
 {
+  pfa_pgid_t pgid = 0;
   pgoff_t off;
   /* This is pretty hacky. We assume 2 things:
    * 1. Linux always uses the first swp device when evicting to PFA (probably
@@ -117,24 +131,34 @@ static inline pfa_pgid_t pfa_swp_to_pgid(swp_entry_t ent)
    */
   BUG_ON(swp_type(ent) != 0);
   off = swp_offset(ent);
-  BUG_ON(off >= (1ul << PFA_PGID_BITS));
-  return off;
+  BUG_ON(off >= (1ul << PFA_PGID_OFFSET_BITS));
+  BUG_ON(tsk_id < 0 || tsk_id >= PFA_MAX_TASKS);
+
+  pgid = tsk_id << PFA_PGID_OFFSET_BITS;
+  pgid |= off; 
+  return pgid;
 }
 
 /* Create a swp_entry_t from a pgid */
 static inline swp_entry_t pfa_pgid_to_swp(pfa_pgid_t pgid)
 {
-  return swp_entry(0, pgid);
+  int off = pgid & ~(~0u << PFA_PGID_OFFSET_BITS);
+  return swp_entry(0, off);
+}
+
+static inline int pfa_pgid_to_tsk(pfa_pgid_t pgid)
+{
+  return pgid >> PFA_PGID_OFFSET_BITS;
 }
 
 /* Create a remote pte */
-static inline pte_t pfa_mk_remote_pte(swp_entry_t swp_ent, pgprot_t prot)
+static inline pte_t pfa_mk_remote_pte(swp_entry_t swp_ent, pgprot_t prot,
+    int tsk_id)
 {
-  pfa_pgid_t pgid = pfa_swp_to_pgid(swp_ent);
+  pfa_pgid_t pgid = pfa_swp_to_pgid(swp_ent, tsk_id);
   /* The page will be marked "fetched" after the PFA fetches it 
    * this flag gets cleared after bookkeeping */
   prot = __pgprot(pgprot_val(prot) | _PAGE_FETCHED);
-  // BUG_ON(!pte_fetched(__pte(pgprot_val(prot))));
   return __pte(
         (pgid << PFA_PGID_SHIFT) |
         (pgprot_val(prot) << PFA_PROT_SHIFT) |
@@ -158,11 +182,20 @@ struct page* pfa_frameq_pop(void);
  * a crash under certain races) */
 int pfa_frameq_search(uintptr_t paddr);
 
-void pfa_set_tsk(struct task_struct *tsk);
+/* Assigns "tsk" to the PFA and gives it a pfa_tsk_id.
+ * Returns 1 on success, 0 on failure (likely due to too many active pfa
+ * tasks) */
+int pfa_set_tsk(struct task_struct *tsk);
 
-/* Must down pfa_tsk->mm->mmap_sem before calling */
-void pfa_clear_tsk(void);
+/* Must down pfa_tsk->mm->mmap_sem before calling.
+ * tsk_id: The struct task_struct->pfa_tsk_id feild*/
+void pfa_clear_tsk(int tsk_id);
 
-static inline struct task_struct *pfa_get_tsk(void) { return pfa_tsk; }
+#define is_pfa_tsk(tsk) (tsk->pfa_tsk_id != -1)
+static inline struct task_struct *pfa_get_tsk(int tsk_id)
+{
+  BUG_ON(tsk_id >= PFA_MAX_TASKS || tsk_id < 0);
+  return pfa_tsk[tsk_id];
+}
 
 #endif

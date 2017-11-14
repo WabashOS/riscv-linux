@@ -44,6 +44,7 @@
 #include <linux/userfaultfd_k.h>
 #include <linux/moduleparam.h>
 #include <linux/pkeys.h>
+#include <linux/pfa.h>
 
 #include <linux/uaccess.h>
 #include <asm/cacheflush.h>
@@ -2619,6 +2620,17 @@ int do_munmap(struct mm_struct *mm, unsigned long start, size_t len,
 {
 	unsigned long end;
 	struct vm_area_struct *vma, *prev, *last;
+
+#ifdef CONFIG_PFA
+  if(is_pfa_tsk(current)) {
+    /* mm->mmap_sem is probably held (or irrelevant) by this point.
+     * It is definitely down_write'd in the case of munmap (in vm_munmap()) */
+    pfa_lock(global);
+    pfa_drain_newq(current->pfa_tsk_id);
+    pfa_unlock(global);
+    pfa_stat_add(n_early_newq, 1)
+  }
+#endif
 
 	if ((offset_in_page(start)) || start > TASK_SIZE || len > TASK_SIZE-start)
 		return -EINVAL;

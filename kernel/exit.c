@@ -777,13 +777,11 @@ void __noreturn do_exit(long code)
 	if (unlikely(!tsk->pid))
 		panic("Attempted to kill the idle task!");
 
-#ifdef USE_PFA
-  if(current == pfa_get_tsk()) {
+#ifdef CONFIG_PFA
+  if(is_pfa_tsk(current)) {
     /* De-register this task from the pfa
      * This also cleans up PFA state */
-    down_read(&tsk->mm->mmap_sem);
-    pfa_clear_tsk();
-    up_read(&tsk->mm->mmap_sem);
+    pfa_clear_tsk(current->pfa_tsk_id);
   }
 #endif
 

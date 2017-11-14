@@ -347,7 +347,7 @@ struct page *__read_swap_cache_async(swp_entry_t entry, gfp_t gfp_mask,
 		/*
 		 * Get a new page to read into from swap.
 		 */
-#ifdef USE_PFA
+#ifdef CONFIG_PFA
     if(!new_page) {
       new_page = pfa_frameq_pop();
     

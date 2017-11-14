@@ -47,12 +47,7 @@ typedef struct pfa_stat {
 /* Add "value" to "feild" of global pfa_stat_t for task "tsk" 
  * NOTE: Right now this just filters by tsk, eventually we might
  * have per-task statistics. */
-#define pfa_stat_add(feild, value, tsk)           \
-  do {                                            \
-    if(tsk == pfa_stat_tsk) {                     \
-      atomic64_add(value, &(pfa_stats.feild));    \
-    }                                             \
-  } while(0)
+#define pfa_stat_add(feild, value) atomic64_add(value, &(pfa_stats.feild)); 
 
 /* Global stats struct (use atomic_* to access feilds) */
 extern pfa_stat_t pfa_stats;

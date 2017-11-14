@@ -1086,6 +1086,11 @@ struct task_struct {
 	/* Used by LSM modules for access restriction: */
 	void				*security;
 #endif
+  /* XXX PFA Really we should guard this with a ifdef CONFIG_PFA, but we use
+   * tsk_id for statistics in our base-cases as well right now */
+  /* -1 indicates non-pfa task. 0-(PFA_MAX_TASKS - 1) is a PFA-enabled task.
+   * >(PFA_MAX_TASKS - 1) should not happen */
+  int pfa_tsk_id;
 
 	/*
 	 * New fields for task_struct should be added above here, so that

@@ -1511,10 +1511,11 @@ static bool try_to_unmap_one(struct page *page, struct vm_area_struct *vma,
 			if (pte_soft_dirty(pteval))
 				swp_pte = pte_swp_mksoft_dirty(swp_pte);
 
-      pfa_stat_add(n_evicted, 1, pfa_get_tsk());
-#ifdef USE_PFA
-      pfa_evict(entry, page_to_phys(page), address);
-      pteval = pfa_mk_remote_pte(entry, pvmw.vma->vm_page_prot);
+      pfa_stat_add(n_evicted, 1);
+#ifdef CONFIG_PFA
+      pfa_evict(entry, page_to_phys(page), address, current);
+      pteval = pfa_mk_remote_pte(entry, pvmw.vma->vm_page_prot,
+          current->pfa_tsk_id);
       set_pte_at(mm, address, pvmw.pte, pteval);
 #else
       set_pte_at(mm, address, pvmw.pte, swp_pte);

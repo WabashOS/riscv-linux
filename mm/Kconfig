@@ -483,6 +483,16 @@ config FRONTSWAP
 
 	  If unsure, say Y to enable frontswap.
 
+config PFA
+  bool "Enable Page-Fault Accelerator (requires HW support)"
+  depends on FRONTSWAP
+  default n
+  help
+    The PFA is a custom accelerator attached to the MMU that automatically
+    fetches pages from remote memory when they are marked "remote".
+
+    If you don't know what this is, don't turn it on.
+
 config CMA
 	bool "Contiguous Memory Allocator"
 	depends on HAVE_MEMBLOCK && MMU

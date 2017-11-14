@@ -152,14 +152,14 @@ static int rswap_frontswap_store(unsigned type, pgoff_t offset,
   bool created_rpage;
   int cpu;
 
-#ifdef USE_PFA
+#ifdef CONFIG_PFA
   /* for PFA, we actually store the page during try_to_unmap_one */
   return 0;
 #else
   uint64_t start = pfa_stat_clock();
   /* In non-pfa mode, we introduce a configurable delay to simulate NW access */
   ndelay(RMEM_WRITE_LAT);
-  pfa_stat_add(t_rmem_write, pfa_stat_clock() - start, pfa_get_tsk());
+  pfa_stat_add(t_rmem_write, pfa_stat_clock() - start);
 #endif
 
   created_rpage = false;
@@ -211,15 +211,15 @@ static int rswap_frontswap_load(unsigned type, pgoff_t offset,
   void *page_vaddr;
   int cpu;
 
-#ifdef USE_PFA
+#ifdef CONFIG_PFA
   /* When using the PFA, the page data was already fetched. Do nothing here.*/
   return 0;
 #else
   uint64_t start = pfa_stat_clock();
   /* Simulate a NW delay in non-PFA mode */
   ndelay(RMEM_READ_LAT);
-  pfa_stat_add(t_rmem_read, pfa_stat_clock() - start, pfa_get_tsk());
-  pfa_stat_add(n_fetched, 1, pfa_get_tsk());
+  pfa_stat_add(t_rmem_read, pfa_stat_clock() - start);
+  pfa_stat_add(n_fetched, 1);
 #endif
 
   /* find page */
@@ -247,7 +247,7 @@ static void rswap_frontswap_invalidate_page(unsigned type, pgoff_t offset)
 {
   struct rswap_page *rpage;
 
-#ifdef USE_PFA
+#ifdef CONFIG_PFA
   /* Hopefully it's OK to never invalidate stuff? I'm not even sure what that
    * would really mean... */
   return;
@@ -274,7 +274,7 @@ static void rswap_frontswap_invalidate_page(unsigned type, pgoff_t offset)
 
 static void rswap_frontswap_invalidate_area(unsigned type)
 {
-#ifdef USE_PFA
+#ifdef CONFIG_PFA
   return;
 #endif
   pr_err("rswap_frontswap_invalidate_area\n");
@@ -284,7 +284,7 @@ static void rswap_frontswap_init(unsigned type)
 {
   init_rswap_pages(REMOTE_BUF_SIZE);
 
-#ifdef USE_PFA
+#ifdef CONFIG_PFA
   pfa_init();
 #endif
   /* This gets initialized either way to collect stats on baselines */

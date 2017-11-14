@@ -26,7 +26,8 @@
 #define PFA_NEW_MAX PFA_FREE_MAX
 #define PFA_EVICT_MAX 1
 
-DEFINE_MUTEX(pfa_mutex);
+DEFINE_MUTEX(pfa_mutex_global);
+DEFINE_MUTEX(pfa_mutex_evict);
 
 /* sysfs stuff */
 ssize_t pfa_sysfs_show_tsk(struct kobject *kobj,
@@ -37,7 +38,7 @@ static ssize_t pfa_sysfs_store_tsk(struct kobject *kobj,
 struct kobj_attribute pfa_sysfs_tsk = __ATTR(pfa_tsk, 0660, pfa_sysfs_show_tsk, pfa_sysfs_store_tsk);
 
 /* Global var. See pfa.h for details */
-struct task_struct *pfa_tsk;
+struct task_struct *pfa_tsk[PFA_MAX_TASKS];
 
 /* After initialization, points to the kernel MMIO addresses for the PFA */
 void __iomem *pfa_io_free;
@@ -104,17 +105,18 @@ void pfa_init(void)
 /* Evict a page to the pfa.
  * ptep - paddr of pte for the page to be evicted
  */
-void pfa_evict(swp_entry_t swp_ent, uintptr_t page_paddr, uintptr_t vaddr)
+void pfa_evict(swp_entry_t swp_ent, uintptr_t page_paddr, uintptr_t vaddr,
+    struct task_struct *tsk)
 {
   uint64_t evict_val;
   int mapcount;
   uint64_t start;
 
   /* Evict Page */
-  pfa_trace("Evicting page (vaddr=0x%lx) (paddr=0x%lx) (pgid=%d)\n",
+  pfa_trace("Evicting page (vaddr=0x%lx) (paddr=0x%lx) (pgid=0x%x)\n",
       vaddr,
       page_paddr,
-      pfa_swp_to_pgid(swp_ent));
+      pfa_swp_to_pgid(swp_ent, current->pfa_tsk_id));
 
 #ifdef PFA_DEBUG
   /* I'm not sure if this is possible in Linux, but free frames may end up on
@@ -135,14 +137,21 @@ void pfa_evict(swp_entry_t swp_ent, uintptr_t page_paddr, uintptr_t vaddr)
   /* Form the packed eviction value defined in pfa spec */
   evict_val = page_paddr >> PAGE_SHIFT;
   BUG_ON(evict_val >> PFA_EVICT_PGID_SHIFT != 0);
-  evict_val |= ((uint64_t)pfa_swp_to_pgid(swp_ent) << PFA_EVICT_PGID_SHIFT);
+  evict_val |= ((uint64_t)pfa_swp_to_pgid(swp_ent, tsk->pfa_tsk_id) << PFA_EVICT_PGID_SHIFT);
 
   start = pfa_stat_clock();
+  
+  pfa_lock(evict);
   writeq(evict_val, pfa_io_evict);
  
   /* Wait for completion */
   while(readq(pfa_io_evictstat) < PFA_EVICT_MAX) {}
-  pfa_stat_add(t_rmem_write, pfa_stat_clock() - start, pfa_get_tsk());
+  // Strict memory ordering is needed to know that the eviction is really complete
+  mb();
+
+  pfa_unlock(evict);
+
+  pfa_stat_add(t_rmem_write, pfa_stat_clock() - start);
 }
 
 /* Add the frame at pfn to the list of free frames for the pfa.
@@ -162,10 +171,11 @@ int64_t pfa_nnew(void)
 
 /* Process one entry from the newq.
  * Assumes there is at least one entry in newq (check NEWSTAT first). 
- * Caller must down pfa_tsk->mm->mmap_sem
+ * mmap_sem_tskid: You may optionally hold the mmap_sem on exactly one task.
+ *    this holds it's task_id (-1 if caller doesn't hold any mmap_sems).
  *
  * Note: Much of this code is stolen from handle_mm_fault */
-static void pfa_new(void)
+static void pfa_new(int mmap_sem_tsk)
 {
   int ret;
   struct mm_struct *mm;
@@ -176,6 +186,7 @@ static void pfa_new(void)
 	struct vm_fault vmf;
   swp_entry_t entry;
   pfa_pgid_t new_pgid;
+  struct task_struct *tsk;
 
   pgd_t *pgd;
   p4d_t *p4d;
@@ -187,13 +198,19 @@ static void pfa_new(void)
   /* Get the new page info from newq and frameq */
   vmf.address = readq(pfa_io_newvaddr) & PAGE_MASK;
   new_pgid = (pfa_pgid_t)readq(pfa_io_newpgid);
-  pfa_trace("Fetching New Page: (pgid=%d)\n", new_pgid);
+  pfa_trace("Fetching New Page: (pgid=0x%x)\n", new_pgid);
   
   entry = pfa_pgid_to_swp(new_pgid);
 
-  BUG_ON(pfa_tsk == NULL);
-  mm = pfa_tsk->mm;
+  tsk = pfa_get_tsk(pfa_pgid_to_tsk(new_pgid));
+  BUG_ON(tsk == NULL);
+
+  mm = tsk->mm;
   BUG_ON(!mm);
+
+  if(tsk->pfa_tsk_id != mmap_sem_tsk) {
+    down_read(&(tsk->mm->mmap_sem));
+  }
   
   vmf.vma = find_vma(mm, vmf.address);
   BUG_ON(!vmf.vma);
@@ -209,6 +226,7 @@ static void pfa_new(void)
    * Much error-checking elided. Look at __handle_mm_fault and
    * _handle_pte_fault for more realistic error checking. */
 	pgd = pgd_offset(mm, vmf.address);
+  BUG_ON(!pgd);
 	p4d = p4d_alloc(mm, pgd, vmf.address);
   BUG_ON(!p4d);
 	vmf.pud = pud_alloc(mm, p4d, vmf.address);
@@ -216,6 +234,11 @@ static void pfa_new(void)
 	vmf.pmd = pmd_alloc(mm, vmf.pud, vmf.address);
   BUG_ON(!vmf.pmd);
   vmf.pte = pte_offset_map(vmf.pmd, vmf.address);
+  BUG_ON(!vmf.pte);
+  
+  /* XXX PFA */
+  /* dump_stack(); */
+  
   vmf.orig_pte = *vmf.pte;
   BUG_ON(pte_none(vmf.orig_pte));
 
@@ -228,28 +251,31 @@ static void pfa_new(void)
   ret = do_swap_page(&vmf);
   BUG_ON(ret & VM_FAULT_ERROR);
 
+  if(tsk->pfa_tsk_id != mmap_sem_tsk)
+    up_read(&(tsk->mm->mmap_sem));
+
   return;
 }
 
-void pfa_drain_newq(void)
+void pfa_drain_newq(int mmap_sem_tsk)
 {
   uint64_t nnew;
   uint64_t cycles = pfa_stat_clock();
 
-  pfa_assert_lock();
+  pfa_assert_lock(global);
 
   nnew = readq(pfa_io_newstat);
   if(nnew) 
     pfa_trace("Draining %lld items from newq\n", nnew);
 
-  pfa_stat_add(n_fetched, nnew, pfa_get_tsk());
   while(nnew)
   {
-    pfa_new(); 
+    pfa_new(mmap_sem_tsk); 
     nnew--;
   }
 
-  pfa_stat_add(t_bookkeeping, pfa_stat_clock() - cycles, pfa_tsk);
+  pfa_stat_add(n_fetched, nnew);
+  pfa_stat_add(t_bookkeeping, pfa_stat_clock() - cycles);
 }
 
 void pfa_fill_freeq(void)
@@ -257,7 +283,7 @@ void pfa_fill_freeq(void)
   struct page* pg;
   uint64_t nframe;
   
-  pfa_assert_lock();
+  pfa_assert_lock(global);
   
   nframe = readq(pfa_io_freestat);
 
@@ -279,33 +305,36 @@ void pfa_fill_freeq(void)
   }
 }
 
-/* Right now, we don't handle any fault, just report and return an error */
 int pfa_handle_fault(struct vm_fault *vmf)
 {
   pfa_trace("Page fault received on remote page (vaddr=0x%lx)\n",
       vmf->address & PAGE_MASK);
-  pfa_stat_add(n_pfa_fault, 1, current);
+  pfa_stat_add(n_pfa_fault, 1);
 
   /* Note: we must already hold mm->mmap_sem or we could deadlock with kpfad */
-  pfa_lock();
+  pfa_lock(global);
 
-  if(!pfa_get_tsk()) {
+  if(!is_pfa_tsk(current)) {
     pfa_trace("Page fault on remote page after PFA exited\n");
     return VM_FAULT_SIGBUS;
   }
 
   /* It's OK to call these even if their queues don't need processing */
   pfa_fill_freeq();
-  pfa_drain_newq();
+  pfa_drain_newq(current->pfa_tsk_id);
  
-  pfa_unlock();
+  pfa_unlock(global);
+
+  /* Even though we didn't change the PTE, we must flush pte from the TLB
+   * to trigger another PT walk (at least on Rocket) */
+	update_mmu_cache(vmf->vma, vmf->address, vmf->pte);
 
   return 0;
 }
 
 void pfa_frameq_push(struct page *frame)
 {
-  pfa_assert_lock();
+  pfa_assert_lock(global);
   BUG_ON(pfa_frameq_size == PFA_FRAMEQ_MAX);
 
 #ifdef PFA_DEBUG
@@ -324,7 +353,7 @@ struct page* pfa_frameq_pop(void)
 {
   struct page *ret;
 
-  pfa_assert_lock();
+  pfa_assert_lock(global);
   BUG_ON(pfa_frameq_size == 0);
   
   ret = pfa_frameq[pfa_frameq_tail];
@@ -356,35 +385,50 @@ int pfa_frameq_search(uintptr_t paddr)
   return 0;
 }
 
-void pfa_set_tsk(struct task_struct *tsk)
+int pfa_set_tsk(struct task_struct *tsk)
 {
-  if(pfa_tsk != NULL) {
-    panic("Calling pfa_set_tsk after it's already set (call pfa_clear_tsk first!)\n");
-  }
-  pfa_trace("Setting (pid=%d) as pfa_task\n", task_tgid_vnr(tsk));
-  pfa_tsk = tsk;
+  int tsk_idx = 0;
+  pfa_trace("Setting (pid=%d) as a pfa_task\n", task_tgid_vnr(tsk));
 
-  kpfad_tsk = kthread_run(kpfad, NULL, "kpfad");
+  /* Find the next from slot in task list */
+  for(tsk_idx = 0; tsk_idx < PFA_MAX_TASKS; tsk_idx++) {
+    if(pfa_tsk[tsk_idx] == NULL)
+      break;
+  }
+  if(tsk_idx == PFA_MAX_TASKS) {
+    pfa_warn("Ran out of pfa task slots (only 32 allowed)!\n");
+    return 0;
+  }
+
+  /* XXX PFA This code is written to eventually support multiple tasks. However,
+   * this might not fully work yet. Right now we enforce only 1 task at a time.*/
+  if(tsk_idx != 0) {
+    panic("PFA doesn't support more than one task right now\n");
+  }
+  pfa_tsk[tsk_idx] = tsk;
+  tsk->pfa_tsk_id = tsk_idx;
+
+  /* kpfad_tsk = kthread_run(kpfad, NULL, "kpfad"); */
   
-  return;
+  return 1;
 }
 
-void pfa_clear_tsk(void)
+void pfa_clear_tsk(int tsk_id)
 {
+  BUG_ON(tsk_id >= PFA_MAX_TASKS || tsk_id < 0);
+  BUG_ON(pfa_tsk[tsk_id] == NULL);
   pfa_trace("De-registering pfa task\n");
 
   /* Can't hold pfa_lock because kthread_stop blocks until kpfad_tsk exits. */
-  kthread_stop(kpfad_tsk);
+  /* kthread_stop(kpfad_tsk); */
 
-  pfa_lock();
+  pfa_lock(global);
 
-  pfa_drain_newq();
-  pfa_tsk = NULL;
+  pfa_drain_newq(-1);
+  pfa_tsk[tsk_id]->pfa_tsk_id = -1;
+  pfa_tsk[tsk_id] = NULL;
 
-  /* XXX PFA I'm not sure this is needed */
-  flush_tlb_all();
-
-  pfa_unlock();
+  pfa_unlock(global);
 
   /* In practice, I should also free the frames in pfa_frameq */
   return;
@@ -401,17 +445,14 @@ static int kpfad(void *p)
       break;
 
     /* NOTE: Lock acquisition order matters here */
-    down_read(&pfa_tsk->mm->mmap_sem);
     /* Not a big deal if we can't get the pfa_lock, just try again later */
-    if(pfa_trylock()) {
-      BUG_ON(!pfa_get_tsk());
+    if(pfa_trylock(global)) {
       pfa_fill_freeq();
-      pfa_drain_newq();
-      pfa_unlock();
+      pfa_drain_newq(-1);
+      pfa_unlock(global);
     }
-    up_read(&pfa_tsk->mm->mmap_sem);
 
-    pfa_stat_add(t_kpfad, pfa_stat_clock() - start, pfa_get_tsk());
+    pfa_stat_add(t_kpfad, pfa_stat_clock() - start);
     usleep_range(5000, 15000);
   }
 
@@ -422,11 +463,21 @@ static int kpfad(void *p)
 ssize_t pfa_sysfs_show_tsk(struct kobject *kobj,
     struct kobj_attribute *attr, char *buf)
 {
-  if(pfa_tsk) {
-    return sprintf(buf, "%d\n", task_tgid_vnr(pfa_tsk));
-  } else {
-    return sprintf(buf, "-1\n");
+  int i;
+  int line_size = 0;
+  int total_size = 0;
+  struct task_struct *tsk;
+
+  for(i = 0; i < PFA_MAX_TASKS; i++) {
+    tsk = pfa_get_tsk(i);
+    if(tsk) {
+       line_size = sprintf(buf, "%d\n", task_tgid_vnr(tsk));
+       buf += line_size;
+       total_size += line_size;
+    }
   }
+
+  return total_size;
 }
 
 static ssize_t pfa_sysfs_store_tsk(struct kobject *kobj,
