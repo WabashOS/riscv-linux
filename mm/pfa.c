@@ -146,8 +146,7 @@ void pfa_evict(swp_entry_t swp_ent, uintptr_t page_paddr, uintptr_t vaddr,
   writeq(evict_val, pfa_io_evict);
  
   /* Wait for completion */
-  while(readq(pfa_io_evictstat) < PFA_EVICT_MAX) {}
-  // Strict memory ordering is needed to know that the eviction is really complete
+  while(readq(pfa_io_evictstat) < PFA_EVICT_MAX) { cpu_relax(); }
   mb();
 
   pfa_unlock(evict);
