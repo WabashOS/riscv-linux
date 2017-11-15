@@ -113,10 +113,11 @@ void pfa_evict(swp_entry_t swp_ent, uintptr_t page_paddr, uintptr_t vaddr,
   uint64_t start;
 
   /* Evict Page */
-  pfa_trace("Evicting page (vaddr=0x%lx) (paddr=0x%lx) (pgid=0x%x)\n",
+  pfa_trace("Evicting page (vaddr=0x%lx) (paddr=0x%lx) (pgid=0x%x) (tsk=%d)\n",
       vaddr,
       page_paddr,
-      pfa_swp_to_pgid(swp_ent, current->pfa_tsk_id));
+      pfa_swp_to_pgid(swp_ent, current->pfa_tsk_id),
+      tsk->pfa_tsk_id);
 
 #ifdef PFA_DEBUG
   /* I'm not sure if this is possible in Linux, but free frames may end up on
@@ -198,10 +199,12 @@ static void pfa_new(int mmap_sem_tsk)
   /* Get the new page info from newq and frameq */
   vmf.address = readq(pfa_io_newvaddr) & PAGE_MASK;
   new_pgid = (pfa_pgid_t)readq(pfa_io_newpgid);
-  pfa_trace("Fetching New Page: (pgid=0x%x)\n", new_pgid);
   
   entry = pfa_pgid_to_swp(new_pgid);
 
+  pfa_trace("Fetching New Page: (pgid=0x%x) (tsk=%d)\n", new_pgid,
+      pfa_pgid_to_tsk(new_pgid));
+  
   tsk = pfa_get_tsk(pfa_pgid_to_tsk(new_pgid));
   BUG_ON(tsk == NULL);
 
@@ -307,8 +310,9 @@ void pfa_fill_freeq(void)
 
 int pfa_handle_fault(struct vm_fault *vmf)
 {
-  pfa_trace("Page fault received on remote page (vaddr=0x%lx)\n",
-      vmf->address & PAGE_MASK);
+  pfa_trace("Page fault received on remote page (vaddr=0x%lx) (tsk=%d)\n",
+      vmf->address & PAGE_MASK,
+      current->pfa_tsk_id);
   pfa_stat_add(n_pfa_fault, 1);
 
   /* Note: we must already hold mm->mmap_sem or we could deadlock with kpfad */
@@ -388,7 +392,6 @@ int pfa_frameq_search(uintptr_t paddr)
 int pfa_set_tsk(struct task_struct *tsk)
 {
   int tsk_idx = 0;
-  pfa_trace("Setting (pid=%d) as a pfa_task\n", task_tgid_vnr(tsk));
 
   /* Find the next from slot in task list */
   for(tsk_idx = 0; tsk_idx < PFA_MAX_TASKS; tsk_idx++) {
@@ -399,6 +402,9 @@ int pfa_set_tsk(struct task_struct *tsk)
     pfa_warn("Ran out of pfa task slots (only 32 allowed)!\n");
     return 0;
   }
+
+  pfa_trace("Setting (pid=%d) as a pfa_task (tsk=%d)\n", task_tgid_vnr(tsk),
+      tsk_idx);
 
   /* XXX PFA This code is written to eventually support multiple tasks. However,
    * this might not fully work yet. Right now we enforce only 1 task at a time.*/
@@ -417,7 +423,7 @@ void pfa_clear_tsk(int tsk_id)
 {
   BUG_ON(tsk_id >= PFA_MAX_TASKS || tsk_id < 0);
   BUG_ON(pfa_tsk[tsk_id] == NULL);
-  pfa_trace("De-registering pfa task\n");
+  pfa_trace("De-registering pfa task (tsk=%d)\n", tsk_id);
 
   /* Can't hold pfa_lock because kthread_stop blocks until kpfad_tsk exits. */
   /* kthread_stop(kpfad_tsk); */
