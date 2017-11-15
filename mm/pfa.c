@@ -265,6 +265,7 @@ void pfa_drain_newq(int mmap_sem_tsk)
   pfa_assert_lock(global);
 
   nnew = readq(pfa_io_newstat);
+  pfa_stat_add(n_fetched, nnew);
   if(nnew) 
     pfa_trace("Draining %lld items from newq\n", nnew);
 
@@ -274,7 +275,6 @@ void pfa_drain_newq(int mmap_sem_tsk)
     nnew--;
   }
 
-  pfa_stat_add(n_fetched, nnew);
   pfa_stat_add(t_bookkeeping, pfa_stat_clock() - cycles);
 }
 
@@ -402,9 +402,9 @@ int pfa_set_tsk(struct task_struct *tsk)
 
   /* XXX PFA This code is written to eventually support multiple tasks. However,
    * this might not fully work yet. Right now we enforce only 1 task at a time.*/
-  if(tsk_idx != 0) {
-    panic("PFA doesn't support more than one task right now\n");
-  }
+  /* if(tsk_idx != 0) { */
+  /*   panic("PFA doesn't support more than one task right now\n"); */
+  /* } */
   pfa_tsk[tsk_idx] = tsk;
   tsk->pfa_tsk_id = tsk_idx;
 
