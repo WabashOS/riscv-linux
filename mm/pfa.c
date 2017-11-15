@@ -22,9 +22,9 @@
 #define PFA_IO_INITMEM             (PFA_IO_BASE + 56)
 
 /* Properties of PFA */
-#define PFA_FREE_MAX 64
+#define PFA_FREE_MAX 10
 #define PFA_NEW_MAX PFA_FREE_MAX
-#define PFA_EVICT_MAX 1
+#define PFA_EVICT_MAX 10
 
 DEFINE_MUTEX(pfa_mutex_global);
 DEFINE_MUTEX(pfa_mutex_evict);
