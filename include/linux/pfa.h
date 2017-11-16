@@ -18,8 +18,8 @@ extern struct task_struct *pfa_tsk[PFA_MAX_TASKS];
 #define PFA_DEBUG
 
 /* Use this for noisy messages you might want to turn off */
-// #define pfa_trace(M, ...) printk("PFA_TRACE: " M, ##__VA_ARGS__)
-#define pfa_trace(M, ...) 
+#define pfa_trace(M, ...) printk("PFA_TRACE: " M, ##__VA_ARGS__)
+// #define pfa_trace(M, ...) 
 
 #define pfa_warn(M, ...) printk("PFA_WARNING: " M, ##__VA_ARGS__)
 // #define pfa_warn(M, ...) 

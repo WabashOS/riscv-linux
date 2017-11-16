@@ -69,6 +69,9 @@ atomic64_t kpfad_sleeptime = ATOMIC_INIT(10000); /* how long to sleep (in us)*/
  */
 static void pfa_free(struct page *pg);
 
+/* Will busy wait until the PFA is done evicting everythign in its evict queue */
+static void pfa_evict_poll(void);
+
 /* PFA management daemon. Mostly drains newq and fills freeq. */
 static int kpfad(void *p);
 
@@ -100,6 +103,14 @@ void pfa_init(void)
   writeq(page_to_phys(pfa_scratch), pfa_io_initmem); 
 
   return;
+}
+
+static void pfa_evict_poll(void)
+{
+  /* Wait for completion */
+  mb();
+  while(readq(pfa_io_evictstat) < PFA_EVICT_MAX) { cpu_relax(); }
+  mb();
 }
 
 /* Evict a page to the pfa.
@@ -143,12 +154,11 @@ void pfa_evict(swp_entry_t swp_ent, uintptr_t page_paddr, uintptr_t vaddr,
   start = pfa_stat_clock();
   
   pfa_lock(evict);
+  /* XXX PFA HW debugging */
+  pfa_evict_poll();
   writeq(evict_val, pfa_io_evict);
+  pfa_evict_poll();
  
-  /* Wait for completion */
-  while(readq(pfa_io_evictstat) < PFA_EVICT_MAX) { cpu_relax(); }
-  mb();
-
   pfa_unlock(evict);
 
   pfa_stat_add(t_rmem_write, pfa_stat_clock() - start);
@@ -200,9 +210,6 @@ static void pfa_new(int mmap_sem_tsk)
   new_pgid = (pfa_pgid_t)readq(pfa_io_newpgid);
   
   entry = pfa_pgid_to_swp(new_pgid);
-
-  pfa_trace("Fetching New Page: (pgid=0x%x) (tsk=%d)\n", new_pgid,
-      pfa_pgid_to_tsk(new_pgid));
   
   tsk = pfa_get_tsk(pfa_pgid_to_tsk(new_pgid));
   BUG_ON(tsk == NULL);
@@ -243,6 +250,12 @@ static void pfa_new(int mmap_sem_tsk)
   
   vmf.orig_pte = *vmf.pte;
   BUG_ON(pte_none(vmf.orig_pte));
+
+  pfa_trace("Fetching New Page: (pgid=0x%x) (vaddr=0x%lx) (tsk=%d) (pte=0x%lx)\n",
+      new_pgid,
+      vmf.address,
+      pfa_pgid_to_tsk(new_pgid),
+      pte_val(vmf.orig_pte));
 
   /* Put the swap entry back into the PTE so we can use the unmodified
    * do_swap_page 
@@ -313,6 +326,9 @@ int pfa_handle_fault(struct vm_fault *vmf)
       vmf->address & PAGE_MASK,
       current->pfa_tsk_id);
   pfa_stat_add(n_pfa_fault, 1);
+
+  /* XXX Probably not needed long-term. Mostly for HW debugging. */
+  pfa_evict_poll();
 
   /* Note: we must already hold mm->mmap_sem or we could deadlock with kpfad */
   pfa_lock(global);
