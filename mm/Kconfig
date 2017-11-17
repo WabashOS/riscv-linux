@@ -483,7 +483,7 @@ config FRONTSWAP
 
 	  If unsure, say Y to enable frontswap.
 
-config PFA
+menuconfig PFA
   bool "Enable Page-Fault Accelerator (requires HW support)"
   depends on FRONTSWAP
   default n
@@ -492,6 +492,51 @@ config PFA
     fetches pages from remote memory when they are marked "remote".
 
     If you don't know what this is, don't turn it on.
+
+if PFA
+
+config PFA_VERBOSE
+  bool "Verbose logging for PFA-related activities\n"
+  default n
+  help
+    The PFA subsystem will print very verbose logging mesages (thousands for a
+    typical application). Turn this on mostly for debugging.
+
+config PFA_DEBUG
+  bool "Enable extended PFA debugging"
+  default n
+  help
+    Enables more extensive (and potentially performance-impacting) debugging and
+    sanity checking.
+
+config PFA_KPFAD
+  bool "Enable the pfa daemon"
+  default y
+  help
+    Start the background bookkeeping daemon (kpfad).
+
+config PFA_FREEQ_SIZE
+  int "Size of free queue"
+  default 10
+  help
+    Defined by the hardware platform. Really this should be in the device tree
+    or something.
+
+config PFA_NEWQ_SIZE
+  int "Size of new queue"
+  default 10
+  help
+    Defined by the hardware platform. Really this should be in the device tree
+    or something.
+
+config PFA_EVICTQ_SIZE
+  int "Size of evict queue"
+  default 10
+  help
+    Defined by the hardware platform. Really this should be in the device tree
+    or something.
+
+endif #PFA
 
 config CMA
 	bool "Contiguous Memory Allocator"

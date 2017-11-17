@@ -3775,24 +3775,21 @@ static int handle_pte_fault(struct vm_fault *vmf)
 	}
   
 #ifdef CONFIG_PFA
-  /* I'd be surprised if a task other than pfa_tsk faulted on a remote page,
-   * but all the pfa_* functions should work anyway (as long as pfa_tsk exists) 
-   */
-    if(pte_remote(vmf->orig_pte)) {
-      return pfa_handle_fault(vmf);
-    } else if (pte_fetched(vmf->orig_pte)) {
-      /* This page hasn't been bookkeeped yet, process it before doing rest of
-       * fault handling */
-      pfa_lock(global);
-      if(!is_pfa_tsk(current)) {
-        panic("Seeing fetched page for non-pfa task.");
-      } else {
-        pfa_stat_add(n_early_newq, 1);
-        pfa_drain_newq(current->pfa_tsk_id);
-        vmf->orig_pte = *vmf->pte;
-      }
-      pfa_unlock(global);
+  if(pte_remote(vmf->orig_pte)) {
+    return pfa_handle_fault(vmf);
+  } else if (pte_fetched(vmf->orig_pte)) {
+    /* This page hasn't been bookkeeped yet, process it before doing rest of
+     * fault handling */
+    pfa_lock(global);
+    if(!is_pfa_tsk(current)) {
+      panic("Seeing fetched page for non-pfa task.");
+    } else {
+      pfa_stat_add(n_early_newq, 1);
+      pfa_drain_newq(current->pfa_tsk_id);
+      vmf->orig_pte = *vmf->pte;
     }
+    pfa_unlock(global);
+  }
 #endif
 
 	if (!pte_present(vmf->orig_pte)) {

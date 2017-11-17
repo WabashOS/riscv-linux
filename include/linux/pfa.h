@@ -14,12 +14,26 @@
 #define PFA_MAX_TASKS (1 << PFA_TASK_BITS)
 extern struct task_struct *pfa_tsk[PFA_MAX_TASKS];
 
-/* Only turn this on for extra paranoid debugging (significant performance hit) */
-#define PFA_DEBUG
+#ifdef CONFIG_PFA_DEBUG
+/* Linux BUG_ON acts really weird (sometimes crashes in strange ways), plus it
+ * doesn't print out as much info as I'd like */
+#define PFA_ASSERT(COND, MSG, ...) \
+  do {  \
+    if(unlikely(!(COND))) { \
+      panic("PFA_ASSERT %s:%d: " MSG, __FILE__, __LINE__, ##__VA_ARGS__); \
+    } \
+  } while(0)
 
+#else
+#define PFA_ASSERT(COND, MSG, ...) 
+#endif
+
+#ifdef CONFIG_PFA_VERBOSE
 /* Use this for noisy messages you might want to turn off */
 #define pfa_trace(M, ...) printk("PFA_TRACE: " M, ##__VA_ARGS__)
-// #define pfa_trace(M, ...) 
+#else
+#define pfa_trace(M, ...)
+#endif
 
 #define pfa_warn(M, ...) printk("PFA_WARNING: " M, ##__VA_ARGS__)
 // #define pfa_warn(M, ...) 
@@ -129,10 +143,11 @@ static inline pfa_pgid_t pfa_swp_to_pgid(swp_entry_t ent, int tsk_id)
    *    offset seems to be a monotonically increasing set of blockIDs (would need
    *    to swap out PBs of data to overflow
    */
-  BUG_ON(swp_type(ent) != 0);
+  PFA_ASSERT(swp_type(ent) == 0, "Swapping to swp device other than 0 (%d)",
+      swp_type(ent));
   off = swp_offset(ent);
-  BUG_ON(off >= (1ul << PFA_PGID_OFFSET_BITS));
-  BUG_ON(tsk_id < 0 || tsk_id >= PFA_MAX_TASKS);
+  PFA_ASSERT(off < (1ul << PFA_PGID_OFFSET_BITS), "Swap page offset too large (wouldn't fit in pgid)\n");
+  PFA_ASSERT(tsk_id >= 0 && tsk_id < PFA_MAX_TASKS, "Invalid task id: %d\n", tsk_id);
 
   pgid = tsk_id << PFA_PGID_OFFSET_BITS;
   pgid |= off; 
@@ -158,7 +173,8 @@ static inline pte_t pfa_mk_remote_pte(swp_entry_t swp_ent, pgprot_t prot,
   pfa_pgid_t pgid = pfa_swp_to_pgid(swp_ent, tsk_id);
   /* The page will be marked "fetched" after the PFA fetches it 
    * this flag gets cleared after bookkeeping */
-  prot = __pgprot(pgprot_val(prot) | _PAGE_FETCHED);
+  prot = __pgprot(pgprot_val(prot) | _PAGE_FETCHED );
+
   return __pte(
         (pgid << PFA_PGID_SHIFT) |
         (pgprot_val(prot) << PFA_PROT_SHIFT) |
@@ -194,7 +210,7 @@ void pfa_clear_tsk(int tsk_id);
 #define is_pfa_tsk(tsk) (tsk->pfa_tsk_id != -1)
 static inline struct task_struct *pfa_get_tsk(int tsk_id)
 {
-  BUG_ON(tsk_id >= PFA_MAX_TASKS || tsk_id < 0);
+  PFA_ASSERT((tsk_id < PFA_MAX_TASKS && tsk_id >= 0), "Invalid task ID: %d", tsk_id);
   return pfa_tsk[tsk_id];
 }
 

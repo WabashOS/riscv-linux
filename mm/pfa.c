@@ -21,11 +21,6 @@
 #define PFA_IO_NEWSTAT             (PFA_IO_BASE + 48)
 #define PFA_IO_INITMEM             (PFA_IO_BASE + 56)
 
-/* Properties of PFA */
-#define PFA_FREE_MAX 10
-#define PFA_NEW_MAX PFA_FREE_MAX
-#define PFA_EVICT_MAX 10
-
 DEFINE_MUTEX(pfa_mutex_global);
 DEFINE_MUTEX(pfa_mutex_evict);
 
@@ -51,7 +46,7 @@ void __iomem *pfa_io_newstat;
 void __iomem *pfa_io_initmem;
 
 /* Holds every frame (struct page*) that is given to the PFA in FIFO order */
-#define PFA_FRAMEQ_MAX (PFA_FREE_MAX + PFA_NEW_MAX)
+#define PFA_FRAMEQ_MAX (CONFIG_PFA_FREEQ_SIZE + CONFIG_PFA_NEWQ_SIZE)
 int pfa_frameq_head = 0;
 int pfa_frameq_tail = 0;
 int pfa_frameq_size = 0;
@@ -72,8 +67,10 @@ static void pfa_free(struct page *pg);
 /* Will busy wait until the PFA is done evicting everythign in its evict queue */
 static void pfa_evict_poll(void);
 
+#ifdef CONFIG_PFA_KPFAD
 /* PFA management daemon. Mostly drains newq and fills freeq. */
 static int kpfad(void *p);
+#endif
 
 void pfa_init(void)
 {
@@ -109,7 +106,7 @@ static void pfa_evict_poll(void)
 {
   /* Wait for completion */
   mb();
-  while(readq(pfa_io_evictstat) < PFA_EVICT_MAX) { cpu_relax(); }
+  while(readq(pfa_io_evictstat) < CONFIG_PFA_EVICTQ_SIZE) { cpu_relax(); }
   mb();
 }
 
@@ -120,7 +117,6 @@ void pfa_evict(swp_entry_t swp_ent, uintptr_t page_paddr, uintptr_t vaddr,
     struct task_struct *tsk)
 {
   uint64_t evict_val;
-  int mapcount;
   uint64_t start;
 
   /* Evict Page */
@@ -130,7 +126,7 @@ void pfa_evict(swp_entry_t swp_ent, uintptr_t page_paddr, uintptr_t vaddr,
       pfa_swp_to_pgid(swp_ent, current->pfa_tsk_id),
       tsk->pfa_tsk_id);
 
-#ifdef PFA_DEBUG
+#ifdef CONFIG_PFA_DEBUG
   /* I'm not sure if this is possible in Linux, but free frames may end up on
    * the lru lists and get re-selected for eviction. */
   if(pfa_frameq_search(page_paddr)) {
@@ -139,7 +135,7 @@ void pfa_evict(swp_entry_t swp_ent, uintptr_t page_paddr, uintptr_t vaddr,
 
   /* The PFA will get right-screwy if we evict shared pages. Who knows what
    * chaos might ensue if that happens! */
-  mapcount = page_mapcount(phys_to_page(page_paddr));
+  int mapcount = page_mapcount(phys_to_page(page_paddr));
   if(mapcount > 1) {
     panic("Page (paddr=0x%lx) shared %d times (sharing not supported in pfa)\n",
         page_paddr, mapcount);
@@ -148,14 +144,12 @@ void pfa_evict(swp_entry_t swp_ent, uintptr_t page_paddr, uintptr_t vaddr,
 
   /* Form the packed eviction value defined in pfa spec */
   evict_val = page_paddr >> PAGE_SHIFT;
-  BUG_ON(evict_val >> PFA_EVICT_PGID_SHIFT != 0);
+  PFA_ASSERT(evict_val >> PFA_EVICT_PGID_SHIFT == 0, "paddr component of eviction string too large\n");
   evict_val |= ((uint64_t)pfa_swp_to_pgid(swp_ent, tsk->pfa_tsk_id) << PFA_EVICT_PGID_SHIFT);
 
   start = pfa_stat_clock();
   
   pfa_lock(evict);
-  /* XXX PFA HW debugging */
-  pfa_evict_poll();
   writeq(evict_val, pfa_io_evict);
   pfa_evict_poll();
  
@@ -201,8 +195,8 @@ static void pfa_new(int mmap_sem_tsk)
   pgd_t *pgd;
   p4d_t *p4d;
 
-#ifdef PFA_DEBUG
-  BUG_ON(readq(pfa_io_newstat) == 0);
+#ifdef CONFIG_PFA_DEBUG
+  PFA_ASSERT(readq(pfa_io_newstat) != 0, "Trying to pop empty newq\n");
 #endif
 
   /* Get the new page info from newq and frameq */
@@ -212,20 +206,20 @@ static void pfa_new(int mmap_sem_tsk)
   entry = pfa_pgid_to_swp(new_pgid);
   
   tsk = pfa_get_tsk(pfa_pgid_to_tsk(new_pgid));
-  BUG_ON(tsk == NULL);
+  PFA_ASSERT(tsk != NULL, "Couldn't find taskID %d\n", pfa_pgid_to_tsk(new_pgid));
 
   mm = tsk->mm;
-  BUG_ON(!mm);
+  PFA_ASSERT(mm, "Task has no struct mm!\n");
 
   if(tsk->pfa_tsk_id != mmap_sem_tsk) {
     down_read(&(tsk->mm->mmap_sem));
   }
   
   vmf.vma = find_vma(mm, vmf.address);
-  BUG_ON(!vmf.vma);
+  PFA_ASSERT(vmf.vma, "Bad VMA\n");
   /* The actual check in do_page_fault is more complicated than this
    * I'm assuming swap-triggered page faults always satisfy this */
-  BUG_ON(!(vmf.vma->vm_start <= vmf.address));
+  PFA_ASSERT((vmf.vma->vm_start <= vmf.address), "Address out of bounds\n");
 
   /* XXX gfp_mask gets set in normal swap path but seems unused. */
   vmf.flags = flags;
@@ -235,21 +229,18 @@ static void pfa_new(int mmap_sem_tsk)
    * Much error-checking elided. Look at __handle_mm_fault and
    * _handle_pte_fault for more realistic error checking. */
 	pgd = pgd_offset(mm, vmf.address);
-  BUG_ON(!pgd);
+  PFA_ASSERT(pgd, "Bad PGD\n");
 	p4d = p4d_alloc(mm, pgd, vmf.address);
-  BUG_ON(!p4d);
+  PFA_ASSERT(p4d, "Bad P4D\n");
 	vmf.pud = pud_alloc(mm, p4d, vmf.address);
-  BUG_ON(!vmf.pud);
+  PFA_ASSERT(vmf.pud, "Bad PUD\n");
 	vmf.pmd = pmd_alloc(mm, vmf.pud, vmf.address);
-  BUG_ON(!vmf.pmd);
+  PFA_ASSERT(vmf.pmd, "Bad PMD\n");
   vmf.pte = pte_offset_map(vmf.pmd, vmf.address);
-  BUG_ON(!vmf.pte);
-  
-  /* XXX PFA */
-  /* dump_stack(); */
+  PFA_ASSERT(vmf.pte, "Bad PTE\n");
   
   vmf.orig_pte = *vmf.pte;
-  BUG_ON(pte_none(vmf.orig_pte));
+  PFA_ASSERT(!pte_none(vmf.orig_pte), "Invalid PTE\n");
 
   pfa_trace("Fetching New Page: (pgid=0x%x) (vaddr=0x%lx) (tsk=%d) (pte=0x%lx)\n",
       new_pgid,
@@ -264,7 +255,7 @@ static void pfa_new(int mmap_sem_tsk)
 	set_pte_at(mm, vmf.address, vmf.pte, vmf.orig_pte);
 
   ret = do_swap_page(&vmf);
-  BUG_ON(ret & VM_FAULT_ERROR);
+  PFA_ASSERT(!(ret & VM_FAULT_ERROR), "Failed to bookkeep page in do_swap_page()\n");
 
   if(tsk->pfa_tsk_id != mmap_sem_tsk)
     up_read(&(tsk->mm->mmap_sem));
@@ -307,7 +298,7 @@ void pfa_fill_freeq(void)
      * pfa_fill_new from the pageout path... */
     pg = alloc_page(GFP_HIGHUSER_MOVABLE);
 
-#ifdef PFA_DEBUG
+#ifdef CONFIG_PFA_DEBUG
     /* Don't want pages with user mappings going out, this is just me being
      * paranoid (alloc_page really shouldn't) */
     if(unlikely(page_mapcount(pg) > 0)) {
@@ -326,9 +317,6 @@ int pfa_handle_fault(struct vm_fault *vmf)
       vmf->address & PAGE_MASK,
       current->pfa_tsk_id);
   pfa_stat_add(n_pfa_fault, 1);
-
-  /* XXX Probably not needed long-term. Mostly for HW debugging. */
-  pfa_evict_poll();
 
   /* Note: we must already hold mm->mmap_sem or we could deadlock with kpfad */
   pfa_lock(global);
@@ -354,10 +342,10 @@ int pfa_handle_fault(struct vm_fault *vmf)
 void pfa_frameq_push(struct page *frame)
 {
   pfa_assert_lock(global);
-  BUG_ON(pfa_frameq_size == PFA_FRAMEQ_MAX);
+  PFA_ASSERT(pfa_frameq_size != PFA_FRAMEQ_MAX, "Pushing to full frameq\n");
 
-#ifdef PFA_DEBUG
-  BUG_ON(pfa_frameq_search(page_to_phys(frame)));
+#ifdef CONFIG_PFA_DEBUG
+  PFA_ASSERT(!pfa_frameq_search(page_to_phys(frame)), "Frame already on frameq\n");
 #endif
 
   pfa_frameq[pfa_frameq_head] = frame;
@@ -373,10 +361,10 @@ struct page* pfa_frameq_pop(void)
   struct page *ret;
 
   pfa_assert_lock(global);
-  BUG_ON(pfa_frameq_size == 0);
+  PFA_ASSERT(pfa_frameq_size != 0, "Popping from empty frameq\n");
   
   ret = pfa_frameq[pfa_frameq_tail];
-  BUG_ON(ret == NULL);
+  PFA_ASSERT(ret != NULL, "FrameQ Corrupted\n");
   
   pfa_frameq[pfa_frameq_tail] = NULL;
 
@@ -429,19 +417,22 @@ int pfa_set_tsk(struct task_struct *tsk)
   pfa_tsk[tsk_idx] = tsk;
   tsk->pfa_tsk_id = tsk_idx;
 
-  /* kpfad_tsk = kthread_run(kpfad, NULL, "kpfad"); */
-  
+#ifdef CONFIG_PFA_KPFAD
+  kpfad_tsk = kthread_run(kpfad, NULL, "kpfad");
+#endif
   return 1;
 }
 
 void pfa_clear_tsk(int tsk_id)
 {
-  BUG_ON(tsk_id >= PFA_MAX_TASKS || tsk_id < 0);
-  BUG_ON(pfa_tsk[tsk_id] == NULL);
+  PFA_ASSERT(tsk_id < PFA_MAX_TASKS && tsk_id >= 0, "Invalid task id: %d\n", tsk_id);
+  PFA_ASSERT(pfa_tsk[tsk_id] != NULL, "No valid PFA task at tskid %d\n", tsk_id);
   pfa_trace("De-registering pfa task (tsk=%d)\n", tsk_id);
 
+#ifdef CONFIG_PFA_KPFAD
   /* Can't hold pfa_lock because kthread_stop blocks until kpfad_tsk exits. */
-  /* kthread_stop(kpfad_tsk); */
+  kthread_stop(kpfad_tsk);
+#endif
 
   pfa_lock(global);
 
@@ -455,6 +446,7 @@ void pfa_clear_tsk(int tsk_id)
   return;
 }
 
+#ifdef CONFIG_PFA_KPFAD
 /* PFA management daemon. Mostly drains newq and fills freeq. */
 static int kpfad(void *p)
 {
@@ -480,6 +472,7 @@ static int kpfad(void *p)
   pfa_trace("kpfad exiting\n");
   return 0;
 }
+#endif
 
 ssize_t pfa_sysfs_show_tsk(struct kobject *kobj,
     struct kobj_attribute *attr, char *buf)
