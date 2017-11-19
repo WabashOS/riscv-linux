@@ -22,6 +22,9 @@ typedef struct pfa_stat {
   /* Total number of page faults (swapping or otherwise) */
   atomic64_t n_fault;
 
+  /* Total time spent in the page-fault handler */
+  atomic64_t t_fault;
+
   /* Total number of page faults due to swapped-out pages (same as major plus
    * minor faults). Should be 0 when PFA enabled. */
   atomic64_t n_swapfault;
@@ -41,6 +44,8 @@ typedef struct pfa_stat {
 
   /* Time spent in kpfad (doesn't include overhead due to context switch) */
   atomic64_t t_kpfad;
+  /* Number of invocations of kpfad (regardless of runtime or lock contention) */
+  atomic64_t n_kpfad;
 
 } pfa_stat_t;
 

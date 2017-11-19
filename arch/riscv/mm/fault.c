@@ -45,16 +45,17 @@ asmlinkage void do_page_fault(struct pt_regs *regs)
 	unsigned int flags = FAULT_FLAG_ALLOW_RETRY | FAULT_FLAG_KILLABLE;
 	int fault, code = SEGV_MAPERR;
 
-#ifdef CONFIG_PFA
-  if(is_pfa_tsk(current))
-    pfa_stat_add(n_fault, 1);
-#endif
+  uint64_t start_time = pfa_stat_clock();
 
 	cause = regs->scause;
 	addr = regs->sbadaddr;
 
 	tsk = current;
 	mm = tsk->mm;
+
+  if(is_pfa_tsk(current)) {
+    pfa_stat_add(n_fault, 1);
+  }
 
 	/*
 	 * Fault-in kernel-space virtual memory on-demand.
@@ -133,8 +134,11 @@ good_area:
 	 * signal first. We do not need to release the mmap_sem because it
 	 * would already be released in __lock_page_or_retry in mm/filemap.c.
 	 */
-	if ((fault & VM_FAULT_RETRY) && fatal_signal_pending(tsk))
+	if ((fault & VM_FAULT_RETRY) && fatal_signal_pending(tsk)) {
+    if(is_pfa_tsk(current))
+      pfa_stat_add(t_fault, pfa_stat_clock() - start_time);
 		return;
+  }
 
 	if (unlikely(fault & VM_FAULT_ERROR)) {
 		if (fault & VM_FAULT_OOM)
@@ -177,6 +181,8 @@ good_area:
 	}
 
 	up_read(&mm->mmap_sem);
+  if(is_pfa_tsk(current))
+    pfa_stat_add(t_fault, pfa_stat_clock() - start_time);
 	return;
 
 	/*
@@ -188,13 +194,18 @@ bad_area:
 	/* User mode accesses just cause a SIGSEGV */
 	if (user_mode(regs)) {
 		do_trap(regs, SIGSEGV, code, addr, tsk);
+    if(is_pfa_tsk(current))
+      pfa_stat_add(t_fault, pfa_stat_clock() - start_time);
 		return;
 	}
 
 no_context:
 	/* Are we prepared to handle this kernel fault? */
-	if (fixup_exception(regs))
+	if (fixup_exception(regs)) {
+    if(is_pfa_tsk(current))
+      pfa_stat_add(t_fault, pfa_stat_clock() - start_time);
 		return;
+  }
 
 	/*
 	 * Oops. The kernel tried to access some bad page. We'll have to
@@ -218,6 +229,8 @@ out_of_memory:
 	if (!user_mode(regs))
 		goto no_context;
 	pagefault_out_of_memory();
+  if(is_pfa_tsk(current))
+    pfa_stat_add(t_fault, pfa_stat_clock() - start_time);
 	return;
 
 do_sigbus:
@@ -226,6 +239,8 @@ do_sigbus:
 	if (!user_mode(regs))
 		goto no_context;
 	do_trap(regs, SIGBUS, BUS_ADRERR, addr, tsk);
+  if(is_pfa_tsk(current))
+    pfa_stat_add(t_fault, pfa_stat_clock() - start_time);
 	return;
 
 vmalloc_fault:
@@ -285,6 +300,8 @@ vmalloc_fault:
 		pte_k = pte_offset_kernel(pmd_k, addr);
 		if (!pte_present(*pte_k))
 			goto no_context;
+    if(is_pfa_tsk(current))
+      pfa_stat_add(t_fault, pfa_stat_clock() - start_time);
 		return;
 	}
 }

@@ -511,7 +511,7 @@ config PFA_DEBUG
 
 config PFA_KPFAD
   bool "Enable the pfa daemon"
-  default y
+  default n
   help
     Start the background bookkeeping daemon (kpfad).
 

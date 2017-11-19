@@ -8,12 +8,6 @@
 #include <linux/mutex.h>
 #include <linux/pfa_stat.h>
 
-/* The PFA can only work for one task at a time right now. 
- * NULL if no one has registered with the PFA. */
-#define PFA_TASK_BITS 5
-#define PFA_MAX_TASKS (1 << PFA_TASK_BITS)
-extern struct task_struct *pfa_tsk[PFA_MAX_TASKS];
-
 #ifdef CONFIG_PFA_DEBUG
 /* Linux BUG_ON acts really weird (sometimes crashes in strange ways), plus it
  * doesn't print out as much info as I'd like */
@@ -37,6 +31,14 @@ extern struct task_struct *pfa_tsk[PFA_MAX_TASKS];
 
 #define pfa_warn(M, ...) printk("PFA_WARNING: " M, ##__VA_ARGS__)
 // #define pfa_warn(M, ...) 
+
+#ifdef CONFIG_PFA
+
+/* The PFA can only work for one task at a time right now. 
+ * NULL if no one has registered with the PFA. */
+#define PFA_TASK_BITS 5
+#define PFA_MAX_TASKS (1 << PFA_TASK_BITS)
+extern struct task_struct *pfa_tsk[PFA_MAX_TASKS];
 
 /* Remote PTE */
 #define PFA_PGID_SHIFT  12
@@ -214,4 +216,33 @@ static inline struct task_struct *pfa_get_tsk(int tsk_id)
   return pfa_tsk[tsk_id];
 }
 
-#endif
+#else //ifdef CONFIG_PFA
+
+/* initialize the system, only call once! */
+void pfa_init(void);
+
+/* The PFA can only work for one task at a time right now. 
+ * NULL if no one has registered with the PFA. */
+#define PFA_TASK_BITS 5
+#define PFA_MAX_TASKS (1 << PFA_TASK_BITS)
+extern struct task_struct *pfa_tsk[PFA_MAX_TASKS];
+
+/* Assigns "tsk" to the PFA and gives it a pfa_tsk_id.
+ * Returns 1 on success, 0 on failure (likely due to too many active pfa
+ * tasks) */
+int pfa_set_tsk(struct task_struct *tsk);
+
+/* Must down pfa_tsk->mm->mmap_sem before calling.
+ * tsk_id: The struct task_struct->pfa_tsk_id feild*/
+void pfa_clear_tsk(int tsk_id);
+
+#define is_pfa_tsk(tsk) (tsk->pfa_tsk_id != -1)
+static inline struct task_struct *pfa_get_tsk(int tsk_id)
+{
+  PFA_ASSERT((tsk_id < PFA_MAX_TASKS && tsk_id >= 0), "Invalid task ID: %d", tsk_id);
+  return pfa_tsk[tsk_id];
+}
+
+#endif //ifdef CONFIG_PFA
+
+#endif //ifdef __PFA_H__

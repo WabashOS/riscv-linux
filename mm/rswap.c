@@ -14,8 +14,12 @@
 #undef RSWAP_DEBUG
 
 /* Remote memory blade read/write latency to simulate (in ns) */
-#define RMEM_WRITE_LAT 1000
-#define RMEM_READ_LAT  1000
+#define RMEM_WRITE_LAT 0
+/* Pessimistic NW (real linux software stack) */
+/* #define RMEM_READ_LAT  31054 */
+
+/* Optimistic NW (baremetal speeds) */
+#define RMEM_READ_LAT 8243 
 
 #define ONEGB (1024UL*1024*1024)
 #define REMOTE_BUF_SIZE (ONEGB * 1) /* must match what server is allocating */
@@ -157,6 +161,7 @@ static int rswap_frontswap_store(unsigned type, pgoff_t offset,
   return 0;
 #else
   uint64_t start = pfa_stat_clock();
+
   /* In non-pfa mode, we introduce a configurable delay to simulate NW access */
   ndelay(RMEM_WRITE_LAT);
   pfa_stat_add(t_rmem_write, pfa_stat_clock() - start);
@@ -284,10 +289,7 @@ static void rswap_frontswap_init(unsigned type)
 {
   init_rswap_pages(REMOTE_BUF_SIZE);
 
-#ifdef CONFIG_PFA
   pfa_init();
-#endif
-  /* This gets initialized either way to collect stats on baselines */
   pfa_stat_init();
 
   pr_info("rswap_frontswap_init end\n");

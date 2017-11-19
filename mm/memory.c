@@ -3793,10 +3793,14 @@ static int handle_pte_fault(struct vm_fault *vmf)
 #endif
 
 	if (!pte_present(vmf->orig_pte)) {
+    int ret;
     uint64_t start = pfa_stat_clock();
-		return do_swap_page(vmf);
-    pfa_stat_add(t_bookkeeping, pfa_stat_clock() - start);
-    pfa_stat_add(n_swapfault, 1);
+		ret = do_swap_page(vmf);
+    if(is_pfa_tsk(current)) {
+      pfa_stat_add(t_bookkeeping, pfa_stat_clock() - start);
+      pfa_stat_add(n_swapfault, 1);
+    }
+    return ret;
   }
 
 	if (pte_protnone(vmf->orig_pte) && vma_is_accessible(vmf->vma))

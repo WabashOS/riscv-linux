@@ -9,6 +9,8 @@
 #include <linux/pfa_stat.h>
 #include "internal.h"
 
+#ifdef CONFIG_PFA
+
 /* Phyiscal addr for MMIO to pfa */
 /* #define PFA_IO_BASE           0x2000 */
 #define PFA_IO_BASE                0x10017000 
@@ -54,9 +56,36 @@ struct page* pfa_frameq[PFA_FRAMEQ_MAX] = {NULL};
 
 /* kpfad settings */
 struct task_struct *kpfad_tsk = NULL;
-atomic64_t kpfad_sleeptime = ATOMIC_INIT(10000); /* how long to sleep (in us)*/
+size_t kpfad_sleeptime = 10000; /* how long to sleep (in us)*/
+/* Max and min time between kpfad run times (in us) */
+/* 1s */
+#define KPFAD_SLEEP_MAX 100000000
+/* 5ms */
+#define KPFAD_SLEEP_MIN 5000
+
 /* How flexible (in us) to be in re-scheduling */
-#define KPFAD_SLEEP_FLEX 5000
+#define KPFAD_SLEEP_SLACK 10000
+
+/* Every time kpfad runs it decs sleeptime by SLEEP_DEC.
+ * Every time the pfa has to cause a fault (to get service) we increment by SLEEP_INC
+ * This attempts to adapt kpfad overhead to usage */
+/* XXX PFA should I do percents instead? */
+#define KPFAD_SLEEP_DEC 1000
+#define KPFAD_SLEEP_INC 100
+
+static inline void kpfad_inc_sleep(void)
+{
+  kpfad_sleeptime += KPFAD_SLEEP_INC;
+    if(kpfad_sleeptime > KPFAD_SLEEP_MAX)
+      kpfad_sleeptime = KPFAD_SLEEP_MAX;
+}
+
+static inline void kpfad_dec_sleep(void)
+{
+  kpfad_sleeptime -= KPFAD_SLEEP_DEC;
+    if(kpfad_sleeptime < KPFAD_SLEEP_MIN)
+      kpfad_sleeptime = KPFAD_SLEEP_MIN;
+}
 
 /* Local Functions */
 /* Add the frame at pfn to the list of free frames for the pfa.
@@ -329,7 +358,11 @@ int pfa_handle_fault(struct vm_fault *vmf)
   /* It's OK to call these even if their queues don't need processing */
   pfa_fill_freeq();
   pfa_drain_newq(current->pfa_tsk_id);
- 
+
+#ifdef CONFIG_PFA_KPFAD
+  kpfad_dec_sleeptime();
+#endif
+
   pfa_unlock(global);
 
   /* Even though we didn't change the PTE, we must flush pte from the TLB
@@ -450,8 +483,12 @@ void pfa_clear_tsk(int tsk_id)
 /* PFA management daemon. Mostly drains newq and fills freeq. */
 static int kpfad(void *p)
 {
+  /* XXX Need to play around to see if this is a good idea... */
+	/* set_user_nice(current, MIN_NICE); */
+
   while(1) {
     uint64_t start = pfa_stat_clock();
+    pfa_stat_add(n_kpfad, 1);
     pfa_trace("kpfad running\n");
 
     if (kthread_should_stop())
@@ -462,11 +499,16 @@ static int kpfad(void *p)
     if(pfa_trylock(global)) {
       pfa_fill_freeq();
       pfa_drain_newq(-1);
+
+      /* Calculate next sleep time */
+      kpfad_inc_sleep();
+      
       pfa_unlock(global);
     }
 
     pfa_stat_add(t_kpfad, pfa_stat_clock() - start);
-    usleep_range(5000, 15000);
+
+    usleep_range(kpfad_sleeptime, kpfad_sleeptime + KPFAD_SLEEP_SLACK);
   }
 
   pfa_trace("kpfad exiting\n");
@@ -512,3 +554,107 @@ static ssize_t pfa_sysfs_store_tsk(struct kobject *kobj,
   return count;
 }
 
+#else //ifdef CONFIG_PFA
+
+/* This is the minimum needed to not use the PFA (baseline experiments)
+ * Mostly this stuff is for stats collection */
+
+/* sysfs stuff */
+ssize_t pfa_sysfs_show_tsk(struct kobject *kobj,
+    struct kobj_attribute *attr, char *buf);
+static ssize_t pfa_sysfs_store_tsk(struct kobject *kobj,
+    struct kobj_attribute *attr, const char *buf, size_t count);
+
+struct kobj_attribute pfa_sysfs_tsk = __ATTR(pfa_tsk, 0660, pfa_sysfs_show_tsk, pfa_sysfs_store_tsk);
+
+/* Global var. See pfa.h for details */
+struct task_struct *pfa_tsk[PFA_MAX_TASKS];
+
+/* Assigns "tsk" to the PFA and gives it a pfa_tsk_id.
+ * Returns 1 on success, 0 on failure (likely due to too many active pfa
+ * tasks) */
+int pfa_set_tsk(struct task_struct *tsk)
+{
+    int tsk_idx = 0;
+
+    /* Find the next from slot in task list */
+    for(tsk_idx = 0; tsk_idx < PFA_MAX_TASKS; tsk_idx++) {
+      if(pfa_tsk[tsk_idx] == NULL)
+        break;
+    }
+    if(tsk_idx == PFA_MAX_TASKS) {
+      pfa_warn("Ran out of pfa task slots (only 32 allowed)!\n");
+      return 0;
+    }
+
+    pfa_trace("Setting (pid=%d) as a pfa_task (tsk=%d)\n", task_tgid_vnr(tsk),
+        tsk_idx);
+
+    /* XXX PFA This code is written to eventually support multiple tasks. However,
+     * this might not fully work yet. Right now we enforce only 1 task at a time.*/
+    /* if(tsk_idx != 0) { */
+    /*   panic("PFA doesn't support more than one task right now\n"); */
+    /* } */
+    pfa_tsk[tsk_idx] = tsk;
+    tsk->pfa_tsk_id = tsk_idx;
+    return 1;
+}
+
+/* Must down pfa_tsk->mm->mmap_sem before calling.
+ * tsk_id: The struct task_struct->pfa_tsk_id feild*/
+void pfa_clear_tsk(int tsk_id)
+{
+  pfa_tsk[tsk_id]->pfa_tsk_id = -1;
+  pfa_tsk[tsk_id] = NULL;
+  return;
+}
+
+ssize_t pfa_sysfs_show_tsk(struct kobject *kobj,
+    struct kobj_attribute *attr, char *buf)
+{
+  int i;
+  int line_size = 0;
+  int total_size = 0;
+  struct task_struct *tsk;
+
+  for(i = 0; i < PFA_MAX_TASKS; i++) {
+    tsk = pfa_tsk[i];
+    if(tsk) {
+       line_size = sprintf(buf, "%d\n", task_tgid_vnr(tsk));
+       buf += line_size;
+       total_size += line_size;
+    }
+  }
+
+  return total_size;
+}
+
+static ssize_t pfa_sysfs_store_tsk(struct kobject *kobj,
+    struct kobj_attribute *attr, const char *buf, size_t count)
+{
+  pid_t pid;
+  struct task_struct *tsk = NULL;
+  if(kstrtoint(buf, 10, &pid) == 0) {
+    tsk = find_task_by_vpid(pid);
+  }
+
+  if(tsk) {
+    pfa_set_tsk(tsk);
+  } else {
+    pfa_trace("Invalid pfa_tsk pid provided\n");
+  }
+
+  return count;
+}
+
+void pfa_init(void)
+{
+  /* Create sysfs interface
+   * Don't fail on errors, User won't be able to use PFA, but we don't need
+   * to crash the kernel either */
+    if(sysfs_create_file(mm_kobj, &pfa_sysfs_tsk.attr) != 0)
+          pr_err("Failed to create sysfs entries\n");
+  
+  return;
+}
+#endif
