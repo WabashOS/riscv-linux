@@ -483,7 +483,8 @@ config FRONTSWAP
 
 	  If unsure, say Y to enable frontswap.
 
-menuconfig PFA
+menu PFA
+config PFA
   bool "Enable Page-Fault Accelerator (requires HW support)"
   depends on FRONTSWAP
   default n
@@ -493,8 +494,13 @@ menuconfig PFA
 
     If you don't know what this is, don't turn it on.
 
-if PFA
-
+config PFA_SW_RMEM
+  bool "Use the network-attached memory blade through software"
+  depends on ! PFA
+  help
+    The OS will swap by directly communicating with the remote memory blade
+    over the network.
+  
 config PFA_VERBOSE
   bool "Verbose logging for PFA-related activities\n"
   default n
@@ -536,7 +542,7 @@ config PFA_EVICTQ_SIZE
     Defined by the hardware platform. Really this should be in the device tree
     or something.
 
-endif #PFA
+endmenu
 
 config CMA
 	bool "Contiguous Memory Allocator"

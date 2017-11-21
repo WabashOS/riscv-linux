@@ -1249,8 +1249,7 @@ again:
 			struct page *page;
 #ifdef CONFIG_PFA
       if (unlikely(pte_fetched(ptent))) {
-        panic("Seeing fetched page after process shutdown. (possible causes "
-          "include shared pages or multiple PIDs sharing the pfa)\n");
+        panic("Seeing fetched page after process shutdown.\n");
       }
 #endif
 			page = vm_normal_page(vma, addr, ptent);

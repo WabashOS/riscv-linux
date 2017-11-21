@@ -10,8 +10,11 @@
 #include <linux/delay.h>
 #include <linux/pfa.h>
 #include <linux/pfa_stat.h>
+#include <linux/icenet_raw.h>
 
 #undef RSWAP_DEBUG
+
+icenic_t *nic;
 
 /* Remote memory blade read/write latency to simulate (in ns) */
 #define RMEM_WRITE_LAT 0
@@ -81,6 +84,64 @@ static inline void debug_add_cpu_usage(int cpu)
   }
 #endif
 }
+
+#ifdef CONFIG_PFA_SW_RMEM
+DEFINE_MUTEX(rmem_mut);
+
+/* ZCopy Interface to memory blade */
+static void rmem_put(uintptr_t src_paddr, uint32_t pgid)
+{
+  /* Command headers 
+   * I'm not sure I have to kmalloc these, but I'm too tired to think about it */
+  uint64_t *hdrs = kmalloc(3*sizeof(uint64_t), GFP_KERNEL);
+  hdrs[0] = 0x100000000000000 | ((uint64_t)pgid << 16);
+  hdrs[1] = 0x101000000000000 | ((uint64_t)pgid << 16);
+  hdrs[2] = 0x102000000000000 | ((uint64_t)pgid << 16);
+
+  mutex_lock(&rmem_mut);
+  ice_post_send(nic, false, virt_to_phys(&hdrs[0]), 8); 
+  ice_post_send(nic, true,  src_paddr, 1368);
+
+  ice_post_send(nic, false, virt_to_phys(&hdrs[1]), 8); 
+  ice_post_send(nic, true,  src_paddr + 1368, 1368);
+
+  ice_post_send(nic, false, virt_to_phys(&hdrs[2]), 8); 
+  ice_post_send(nic, true,  src_paddr + 2*1368, 1360);
+
+  /* ZCopy has to wait for completion (we could memcpy and then transmit
+   * asynchronously, but...meh) */
+  ice_drain_sendq(nic);
+  mutex_unlock(&rmem_mut);
+
+  kfree(hdrs);
+  
+  return;
+}
+
+static void rmem_get(uintptr_t dest_paddr, uint32_t pgid)
+{
+  /* I'm not sure I have to kmalloc this, but I'm too tired to think about it */
+  uint64_t *hdr = kmalloc(8, GFP_KERNEL);
+  *hdr = (uint64_t)pgid << 16;
+
+  mutex_lock(&rmem_mut);
+  /* MemBlade will respond with 3 packets forming one page */
+  ice_post_recv(nic, dest_paddr);
+  ice_post_recv(nic, dest_paddr + 1368);
+  ice_post_recv(nic, dest_paddr + 2*1368);
+
+  ice_post_send(nic, true, virt_to_phys(hdr), 8);
+  
+  /* Block until all packets received */
+  ice_recv_one(nic);
+  ice_recv_one(nic);
+  ice_recv_one(nic);
+  mutex_unlock(&rmem_mut);
+
+  kfree(hdr);
+  return;
+}
+#endif
 
 /*
  * returns a free rswap_page
@@ -159,6 +220,12 @@ static int rswap_frontswap_store(unsigned type, pgoff_t offset,
 #ifdef CONFIG_PFA
   /* for PFA, we actually store the page during try_to_unmap_one */
   return 0;
+#elif defined CONFIG_PFA_SW_RMEM
+/* Baseline that talks to the real NW memory blade */
+   page_vaddr = kmap_atomic(page); 
+   rmem_put(virt_to_phys(page_vaddr), offset);
+   kunmap_atomic(page_vaddr);
+   return 0;
 #else
   uint64_t start = pfa_stat_clock();
 
@@ -218,6 +285,11 @@ static int rswap_frontswap_load(unsigned type, pgoff_t offset,
 
 #ifdef CONFIG_PFA
   /* When using the PFA, the page data was already fetched. Do nothing here.*/
+  return 0;
+#elif defined CONFIG_PFA_SW_RMEM
+  page_vaddr = kmap_atomic(page);
+  rmem_get(virt_to_phys(page_vaddr), offset);
+  kunmap_atomic(page_vaddr);
   return 0;
 #else
   uint64_t start = pfa_stat_clock();
@@ -290,6 +362,7 @@ static void rswap_frontswap_init(unsigned type)
   init_rswap_pages(REMOTE_BUF_SIZE);
 
   pfa_init();
+  nic = ice_init();
   pfa_stat_init();
 
   pr_info("rswap_frontswap_init end\n");

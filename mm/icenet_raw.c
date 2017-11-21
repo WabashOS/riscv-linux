@@ -40,25 +40,25 @@ static inline int recv_comp_avail(icenic_t *nic)
 	return (ioread16(nic->iomem + ICENET_COUNTS) >> 12) & 0xf;
 }
 
-void post_send(
-		icenic_t *nic, bool last, uintptr_t paddr, size_t len)
+void ice_post_send(icenic_t *nic, bool last, uintptr_t paddr, size_t len)
 {
 	uint64_t command = 0;
 
-  BUG_ON((paddr & 0x7) != 0);
-  BUG_ON((len / 8) != 0);
+  if( ((paddr & 0x7ll) != 0) ||
+      ((len % 8) != 0)) {
+    printk("paddr: 0x%lx, len = 0x%lx\n", paddr, len);
+    panic("Mis-aligned packet");
+  }
 	command = (len << 48) | (paddr & 0xffffffffffffL);
-  command |= last ? 0 : 1;
+  command |= last ? 0 : (1ul << 63);
 
 	iowrite64(command, nic->iomem + ICENET_SEND_REQ);
-
-	printk(KERN_DEBUG "IceNet: tx addr=%lx len=%llu\n", paddr, len);
 }
 
-void drain_sendq(icenic_t *nic)
+void ice_drain_sendq(icenic_t *nic)
 {
   /* Poll until there are no more pending sends */
-  while(send_comp_avail(nic) < nic->sendq_max) { 
+  while(send_req_avail(nic) < nic->sendq_max) { 
     cpu_relax();
   }
 
@@ -70,24 +70,26 @@ void drain_sendq(icenic_t *nic)
   return;
 }
 
-void post_recv(icenic_t *nic, uintptr_t paddr)
+void ice_post_recv(icenic_t *nic, uintptr_t paddr)
 {
-  BUG_ON(paddr & 0x7 != 0);
+  if((paddr & 0x7) != 0) {
+    panic("Unaligned receive buffer: %lx\n", paddr);
+  }
 	iowrite64(paddr, nic->iomem + ICENET_RECV_REQ);
 }
 
-size_t recv_one(icenic_t *nic)
+size_t ice_recv_one(icenic_t *nic)
 {
-  size_t len;
   /* Wait for there to be something in the recv_comp Q */
   while(recv_comp_avail(nic) == 0) { cpu_relax(); }
 
   /* Pop exactly one thing off Q */
-  return ioread64(nic->iomem + ICENET_RECV_COMP);
+  return (size_t)ioread16(nic->iomem + ICENET_RECV_COMP);
 }
 
-icenic_t *icenet_init(void)
+icenic_t *ice_init(void)
 {
+  printk("Initializing raw ice nic\n");
   icenic_t *nic = kmalloc(sizeof(icenic_t), GFP_KERNEL);
 
   /* XXX init iomem */
