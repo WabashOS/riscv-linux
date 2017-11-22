@@ -1249,8 +1249,11 @@ again:
 			struct page *page;
 #ifdef CONFIG_PFA
       if (unlikely(pte_fetched(ptent))) {
+        /* panic("Seeing fetched page after process shutdown.\n"); */
+        /* This isn't ideal, but I don't know why these are happening and
+         * they aren't really fatal */
         panic("Seeing fetched page after process shutdown.\n");
-      }
+     }
 #endif
 			page = vm_normal_page(vma, addr, ptent);
 			if (unlikely(details) && page) {

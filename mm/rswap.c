@@ -106,7 +106,6 @@ static int pg_cmp(uint64_t *p1, uint64_t *p2)
 static void rmem_put(uintptr_t src_paddr, uint32_t pgid)
 {
   unsigned long irq;
-  uint64_t now, nepoc;
   uint64_t *hdrs;
   uint64_t start, end;
   

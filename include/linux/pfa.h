@@ -32,6 +32,10 @@
 #define pfa_warn(M, ...) printk("PFA_WARNING: " M, ##__VA_ARGS__)
 // #define pfa_warn(M, ...) 
 
+/* We rate-limit our evictions since the PFA doesn't right now 
+ * Call this right before sending traffic to the memory blade. */
+void pfa_limit_evict(void);
+
 #ifdef CONFIG_PFA
 
 /* The PFA can only work for one task at a time right now. 
@@ -101,10 +105,6 @@ static inline int __pfa_trylock(const char *file, int line, struct mutex *lock) 
 
 /* initialize the system, only call once! */
 void pfa_init(void);
-
-/* We rate-limit our evictions since the PFA doesn't right now 
- * Call this right before sending traffic to the memory blade. */
-void pfa_limit_evict(void);
 
 /* Evict a page to the pfa. */
 void pfa_evict(swp_entry_t swp_ent, uintptr_t page_paddr, uintptr_t vaddr,
