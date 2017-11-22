@@ -12,9 +12,8 @@
 #include <linux/pfa_stat.h>
 #include <linux/icenet_raw.h>
 
-#undef RSWAP_DEBUG
-
-icenic_t *nic;
+/* #undef RSWAP_DEBUG */
+#define RSWAP_DEBUG
 
 /* Remote memory blade read/write latency to simulate (in ns) */
 #define RMEM_WRITE_LAT 0
@@ -86,19 +85,46 @@ static inline void debug_add_cpu_usage(int cpu)
 }
 
 #ifdef CONFIG_PFA_SW_RMEM
-DEFINE_MUTEX(rmem_mut);
+icenic_t *nic;
+spinlock_t rmem_mut;
+uint16_t txid;
+
+static int pg_cmp(uint64_t *p1, uint64_t *p2)
+{
+  int i;
+  for(i = 0; i < 4096 / sizeof(uint64_t); i++)
+  {
+    if(p1[i] != p2[i]) {
+      printk("Pages mismatch at index %d (%llx != %llx)\n", i, p1[i], p2[i]);
+      return 0;
+    }
+  }
+  return 1;
+}
 
 /* ZCopy Interface to memory blade */
 static void rmem_put(uintptr_t src_paddr, uint32_t pgid)
 {
+  unsigned long irq;
+  uint64_t now, nepoc;
+  uint64_t *hdrs;
+  uint64_t start, end;
+  
+  spin_lock_irqsave(&rmem_mut, irq);
+ 
   /* Command headers 
    * I'm not sure I have to kmalloc these, but I'm too tired to think about it */
-  uint64_t *hdrs = kmalloc(3*sizeof(uint64_t), GFP_KERNEL);
-  hdrs[0] = 0x100000000000000 | ((uint64_t)pgid << 16);
-  hdrs[1] = 0x101000000000000 | ((uint64_t)pgid << 16);
-  hdrs[2] = 0x102000000000000 | ((uint64_t)pgid << 16);
+  hdrs = kmalloc(3*sizeof(uint64_t), GFP_KERNEL);
+  PFA_ASSERT(hdrs, "Failed to allocate rmem_get headers\n");
+  
+  hdrs[0] = 0x100000000000000 | ((uint64_t)pgid << 16) | txid;
+  hdrs[1] = 0x101000000000000 | ((uint64_t)pgid << 16) | txid;
+  hdrs[2] = 0x102000000000000 | ((uint64_t)pgid << 16) | txid;
 
-  mutex_lock(&rmem_mut);
+  /* Rate limit ourselves to avoid overwhelming the memory blade */
+  pfa_limit_evict();
+
+  start = pfa_stat_clock();
   ice_post_send(nic, false, virt_to_phys(&hdrs[0]), 8); 
   ice_post_send(nic, true,  src_paddr, 1368);
 
@@ -108,10 +134,16 @@ static void rmem_put(uintptr_t src_paddr, uint32_t pgid)
   ice_post_send(nic, false, virt_to_phys(&hdrs[2]), 8); 
   ice_post_send(nic, true,  src_paddr + 2*1368, 1360);
 
+  ice_drain_sendq(nic);
+  end = pfa_stat_clock();
+  /* printk("Started sending at: %lld\n", start); */
+  /* printk("Send completions at: %lld\n", end); */
+
   /* ZCopy has to wait for completion (we could memcpy and then transmit
    * asynchronously, but...meh) */
-  ice_drain_sendq(nic);
-  mutex_unlock(&rmem_mut);
+  /* printk("rmem_put txid %d, pgid %d\n", txid, pgid); */
+  txid++;
+  spin_unlock_irqrestore(&rmem_mut, irq);
 
   kfree(hdrs);
   
@@ -120,28 +152,72 @@ static void rmem_put(uintptr_t src_paddr, uint32_t pgid)
 
 static void rmem_get(uintptr_t dest_paddr, uint32_t pgid)
 {
+  unsigned long irq;
+
   /* I'm not sure I have to kmalloc this, but I'm too tired to think about it */
   uint64_t *hdr = kmalloc(8, GFP_KERNEL);
-  *hdr = (uint64_t)pgid << 16;
+  PFA_ASSERT(hdr, "Failed to allocate rmem_get headers\n");
+  
+  spin_lock_irqsave(&rmem_mut, irq);
+ 
+  *hdr = ((uint64_t)pgid << 16) | txid;
 
-  mutex_lock(&rmem_mut);
   /* MemBlade will respond with 3 packets forming one page */
   ice_post_recv(nic, dest_paddr);
   ice_post_recv(nic, dest_paddr + 1368);
   ice_post_recv(nic, dest_paddr + 2*1368);
 
+  /* printk("rmem_get txid %d, pgid %d\n", txid, pgid); */
   ice_post_send(nic, true, virt_to_phys(hdr), 8);
-  
+  ice_drain_sendq(nic);
+ 
   /* Block until all packets received */
   ice_recv_one(nic);
   ice_recv_one(nic);
   ice_recv_one(nic);
-  mutex_unlock(&rmem_mut);
+  txid++;
+  /* printk("rmem_got txid %d, pgid %d\n", txid, pgid); */
+  spin_unlock_irqrestore(&rmem_mut, irq);
 
   kfree(hdr);
   return;
 }
-#endif
+
+/* This is a unit test for the RMEM interface. You don't need (and probably
+ * shouldn't) run this normally */
+static int rmem_unit_test(void)
+{
+  int i;
+  uint64_t put_start, get_start, put_cycles, get_cycles;
+  uint64_t *pg = kmalloc(4096, GFP_KERNEL);
+  for(i = 0; i < (4096 / 8); i++) {
+    pg[i] = 0xDEADBEEFCAFEBABE;
+  }
+
+  put_start = pfa_stat_clock();
+  rmem_put(virt_to_phys(pg), 0);
+  put_cycles = pfa_stat_clock() - put_start;
+
+  /* Reset values (to detect memory corruption */
+  for(i = 0; i < (4096 / 8); i++) {
+    pg[i] = 0xAAAABBBBCCCCDDDD;
+  }
+
+  get_start = pfa_stat_clock();
+  rmem_get(virt_to_phys(pg), 0);
+  get_cycles = pfa_stat_clock() - get_start;
+   for(i = 0; i < (4096 / 8); i++) {
+    if(pg[i] != 0xDEADBEEFCAFEBABE) {
+      printk("RMEM unit test failure;");
+      return 0;
+    }
+  }
+ 
+  printk("RMEM Put: %lld cycles\nRMEM Get: %lld cycles\n", put_cycles,
+      get_cycles);
+  return 1;
+}
+#endif //defined CONFIG_PFA_SW_RMEM
 
 /*
  * returns a free rswap_page
@@ -182,7 +258,6 @@ static void init_rswap_pages(u64 buffersize)
   unsigned int num_rpages = buffersize / PAGE_SIZE;
   struct rswap_page *rpage;
   unsigned int i;
-
   INIT_LIST_HEAD(&page_head);
   spin_lock_init(&list_lock);
 
@@ -222,17 +297,18 @@ static int rswap_frontswap_store(unsigned type, pgoff_t offset,
   return 0;
 #elif defined CONFIG_PFA_SW_RMEM
 /* Baseline that talks to the real NW memory blade */
-   page_vaddr = kmap_atomic(page); 
-   rmem_put(virt_to_phys(page_vaddr), offset);
-   kunmap_atomic(page_vaddr);
-   return 0;
-#else
+  page_vaddr = kmap_atomic(page); 
+  /* printk("Starting put: pgid=%ld\n", offset); */
+  rmem_put(virt_to_phys(page_vaddr), offset);
+  kunmap_atomic(page_vaddr);
+  /* printk("Done storing: pgid=%ld\n", offset); */
+  return 0;
+#endif
   uint64_t start = pfa_stat_clock();
 
   /* In non-pfa mode, we introduce a configurable delay to simulate NW access */
   ndelay(RMEM_WRITE_LAT);
   pfa_stat_add(t_rmem_write, pfa_stat_clock() - start);
-#endif
 
   created_rpage = false;
   rpage = rhashtable_lookup_fast(&page_ht, &offset, htparams);
@@ -288,8 +364,10 @@ static int rswap_frontswap_load(unsigned type, pgoff_t offset,
   return 0;
 #elif defined CONFIG_PFA_SW_RMEM
   page_vaddr = kmap_atomic(page);
+  /* printk("Beginning loading: pgid=%ld\n", offset); */
   rmem_get(virt_to_phys(page_vaddr), offset);
   kunmap_atomic(page_vaddr);
+  /* printk("Done loading: pgid=%ld\n", offset); */
   return 0;
 #else
   uint64_t start = pfa_stat_clock();
@@ -317,6 +395,7 @@ static int rswap_frontswap_load(unsigned type, pgoff_t offset,
   put_cpu();
 
   debug_loaded_rpages++;
+
   return 0;
 }
 
@@ -327,6 +406,8 @@ static void rswap_frontswap_invalidate_page(unsigned type, pgoff_t offset)
 #ifdef CONFIG_PFA
   /* Hopefully it's OK to never invalidate stuff? I'm not even sure what that
    * would really mean... */
+  return;
+#elif defined CONFIG_PFA_SW_RMEM
   return;
 #endif
 
@@ -353,17 +434,26 @@ static void rswap_frontswap_invalidate_area(unsigned type)
 {
 #ifdef CONFIG_PFA
   return;
+#elif defined CONFIG_SW_RMEM
+  return;
 #endif
   pr_err("rswap_frontswap_invalidate_area\n");
 }
 
 static void rswap_frontswap_init(unsigned type)
 {
-  init_rswap_pages(REMOTE_BUF_SIZE);
-
   pfa_init();
-  nic = ice_init();
   pfa_stat_init();
+
+#ifdef CONFIG_PFA_SW_RMEM
+  spin_lock_init(&rmem_mut);
+  nic = ice_init();
+  /* if(!rmem_unit_test()) { */
+  /*   printk("RMEM doesn't work, don't swap you fools!!!\n"); */
+  /* } */
+#else
+  init_rswap_pages(REMOTE_BUF_SIZE);
+#endif
 
   pr_info("rswap_frontswap_init end\n");
 }

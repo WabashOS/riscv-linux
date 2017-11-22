@@ -7,6 +7,7 @@
 #include <linux/timex.h>
 #include <linux/pfa.h>
 #include <linux/pfa_stat.h>
+#include <linux/icenet_raw.h>
 #include "internal.h"
 
 #ifdef CONFIG_PFA
@@ -131,6 +132,39 @@ void pfa_init(void)
   return;
 }
 
+/* We rate-limit our evictions since the PFA doesn't right now 
+ * Call this right before sending traffic to the memory blade. */
+int64_t outstanding = 0;
+uint64_t epoc_start = 0;
+/* Max number of outstanding evictions per epoc */
+#define MAX_OUTSTANDING 15
+/* Period of time (cycles) in which we cannot evict more than MAX_OUTSTANDING */
+#define EVICT_EPOC 19775
+void pfa_limit_evict(void)
+{
+  uint64_t now, nepoc;
+  
+  if(epoc_start == 0)
+    epoc_start = pfa_stat_clock();
+
+  now = pfa_stat_clock();
+  nepoc = (now - epoc_start) / EVICT_EPOC;
+  outstanding -= nepoc;
+  epoc_start += nepoc*EVICT_EPOC;
+  if(outstanding < 0)
+    outstanding = 0;
+
+  /* Wait until we're below our limit */
+  if(outstanding >= MAX_OUTSTANDING) {
+    /* Wait for an epoch */
+    while(pfa_stat_clock() < epoc_start + EVICT_EPOC) { cpu_relax(); }
+    epoc_start += EVICT_EPOC;
+    outstanding--;
+  }
+  
+  outstanding++;
+}
+
 static void pfa_evict_poll(void)
 {
   /* Wait for completion */
@@ -179,6 +213,7 @@ void pfa_evict(swp_entry_t swp_ent, uintptr_t page_paddr, uintptr_t vaddr,
   start = pfa_stat_clock();
   
   pfa_lock(evict);
+  pfa_limit_evict();
   writeq(evict_val, pfa_io_evict);
   pfa_evict_poll();
  
