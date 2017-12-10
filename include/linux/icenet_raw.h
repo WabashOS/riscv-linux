@@ -1,8 +1,8 @@
 #include <linux/io.h>
 
 typedef struct icenic {
-	struct device *dev;
-	void __iomem *iomem;
+  struct device *dev;
+  void __iomem *iomem;
   size_t sendq_max;
   size_t recvq_max;
 } icenic_t;
