@@ -85,8 +85,6 @@ static inline void debug_add_cpu_usage(int cpu)
 }
 
 #ifdef CONFIG_PFA_SW_RMEM
-spinlock_t rmem_mut;
-
 static int pg_cmp(uint64_t *p1, uint64_t *p2)
 {
   int i;
@@ -103,42 +101,22 @@ static int pg_cmp(uint64_t *p1, uint64_t *p2)
 /* ZCopy Interface to memory blade */
 static void rmem_put(uintptr_t src_vaddr, uint32_t pgid)
 {
-  
-  unsigned long irq;
-  uint64_t *hdrs;
   uint64_t start, end;
-  
-  spin_lock_irqsave(&rmem_mut, irq);
  
   pfa_limit_evict();
 
   start = pfa_stat_clock();
-
   remote_set(src_vaddr, pgid, 1);
-
   end = pfa_stat_clock();
   /* printk("Started sending at: %lld\n", start); */
   /* printk("Send completions at: %lld\n", end); */
 
-  /* ZCopy has to wait for completion (we could memcpy and then transmit
-   * asynchronously, but...meh) */
-  /* printk("rmem_put txid %d, pgid %d\n", txid, pgid); */
-  spin_unlock_irqrestore(&rmem_mut, irq);
-  
   return;
 }
 
 static void rmem_get(uintptr_t dst_vaddr, uint32_t pgid)
 {
-  unsigned long irq;
-
-  spin_lock_irqsave(&rmem_mut, irq);
-
   remote_get(pgid, dst_vaddr, 1);
- 
-  /* printk("rmem_got txid %d, pgid %d\n", txid, pgid); */
-  spin_unlock_irqrestore(&rmem_mut, irq);
-
   return;
 }
 

@@ -5,56 +5,67 @@
 #include <linux/rmem_proto.h>
 #include <linux/slab.h>
 #include <linux/syscalls.h>
+#include <linux/spinlock.h>
 
-icenic_t *nic;
+icenic_t *nic = NULL;
 MemBladeMetadata *blade = NULL;
+spinlock_t rmem_mut;
 
 // TODO(growly): Fetch our MAC address from the icenic.
 uint8_t our_mac[] = {0xca, 0xfe, 0xfe, 0xed, 0xbe, 0xef};
 
-// TODO(growly): SimpleListNode management.
-//static void _enqueue(SimpleListNode **prev, void *ptr) {
-//  SimpleListNode *node = kcalloc(1, sizeof(SimpleListNode), 1);
-//  node->ptr = ptr;
-//  if (*prev == NULL) {
-//    *prev = node;
-//  } else {
-//    (*prev)->next = node;
-//  }
-//
-//}
-//
-//static SimpleListNode *_free_all(SimpleListNode *list) {
-//}
+static void _list_init(SimpleList *list) {
+  list->front = NULL;
+  list->back = NULL;
+}
+
+static void _list_enqueue(SimpleList *list, void *ptr) {
+  SimpleListNode *node = kcalloc(1, sizeof(SimpleListNode), 1);
+  node->ptr = ptr;
+  if (list->front == NULL) {
+    list->front = node;
+    list->back = node;
+  } else {
+    list->back->next = node;
+    list->back = node;
+  }
+}
+
+static void _list_free_all(SimpleList *list) {
+  SimpleListNode *next_header;
+  while (list->front != NULL) {
+    kfree(list->front->ptr);
+    next_header = list->front->next;
+    kfree(list->front);
+    list->front = next_header;
+  }
+  list->front = NULL;
+  list->back = NULL;
+}
 
 // Store n pages' worth of data from *src (a physical address) at consecutive
 // blocks starting from block_id.
 static void rmem_remote_set_one_block(uint8_t *src_paddr, block_id_t block_id) {
-  //unsigned long irq;
-  //uint64_t start, end;
-  
-  //spin_lock_irqsave(&rmem_mut, irq);
-
-  SimpleListNode *first_header = NULL, *last_header = NULL, *next_header = NULL;
-
-  size_t data_to_request = blade->block_size_bytes;
+  SimpleList headers; 
+  unsigned long flags;
+  size_t data_to_request = 0;
   uint8_t part = 0;
+  uint8_t *header = NULL;
+
+  _list_init(&headers);
+
+  // TODO(growly): Is this locking too aggressive?
+  spin_lock_irqsave(&rmem_mut, flags);
+
+  data_to_request = blade->block_size_bytes;
+  part = 0;
   while (data_to_request > 0) {
     // Build header to send remaining bytes.
     uint8_t *header = (uint8_t*)kcalloc(
         RMEM_REQUEST_HEADER_SIZE_BYTES, sizeof(uint8_t), 0);
 
     // Manage header list.
-    if (!first_header) {
-      first_header = (SimpleListNode*)kcalloc(1, sizeof(SimpleListNode), 1);
-      first_header->ptr = header;
-      last_header = first_header;
-    } else {
-      next_header = (SimpleListNode*)kcalloc(1, sizeof(SimpleListNode), 1);
-      next_header->ptr = header;
-      last_header->next = next_header;
-      last_header = next_header;
-    }
+    _list_enqueue(&headers, header);
 
     uint32_t transaction_id = blade->next_transaction_id++;
     size_t payload_size = min(data_to_request, RMEM_MAX_PAYLOAD_BYTES);
@@ -77,48 +88,25 @@ static void rmem_remote_set_one_block(uint8_t *src_paddr, block_id_t block_id) {
     printk("request op: %02x part: %u page: %u txn: %u payload %lu\n",
            RMEM_REQUEST_OP_PAGE_WRITE, part, block_id, transaction_id, payload_size);
      
-    //size_t src_index = i * blade->block_size_bytes + part * MAX_PAYLOAD_BYTES;
-    //memcpy(send_buffer + tx_len, src + src_index, payload_size);
-    //tx_len += payload_size;
-
     // TODO(growly): Have to make sure the entire packet is 8-byte aligned if
     // appending FCS.
     //append_ethernet_fcs(char *buffer, size_t length);
 
-    // Set up and insert the request data before the request is sent, so that
-    // a quick response can't interleave.
-    //MemBladeRequestMetadata *request =
-    //    malloc(sizeof(MemBladeRequestMetadata));
-    //assert(request != NULL);
-    //request->data_expected_bytes = 0;
-    //request->op_code = REQUEST_OP_WRITE;
-    //request->transaction_id = transaction_id;
-    //request->data_received_bytes = 0;
-    //request->responses_received = 0;
-
-    //pthread_mutex_lock(&request->lock);
-
-    //HashTableInsert(blade->request_table, transaction_id, request);
+    // TODO(growly): We currently do no outstanding request tracking; if the
+    // response isn't complete then we fail. There is only one send/receive
+    // request thread. We can imitate the user-space version if this is the bottleneck.
 
     part++;
     data_to_request -= payload_size;
-
-    //while (request->responses_received < 1) {
-    //  pthread_cond_wait(&request->receipt_cond, &request->lock);
-    //}
-    //pthread_mutex_unlock(&request->lock);
   }
 
   // Set up buffer for the response.
-  uint8_t *header = kcalloc(
+  header = kcalloc(
       RMEM_RESPONSE_HEADER_SIZE_BYTES + RMEM_MAX_PAYLOAD_BYTES,
       sizeof(uint8_t),
       0);
 
-  next_header = kcalloc(1, sizeof(SimpleListNode), 1);
-  next_header->ptr = header;
-  last_header->next = next_header;
-  last_header = next_header;
+  _list_enqueue(&headers, header);
 
   ice_post_recv(nic, virt_to_phys(header));
 
@@ -133,31 +121,17 @@ static void rmem_remote_set_one_block(uint8_t *src_paddr, block_id_t block_id) {
          response->common.version, response->common.code,
          response->transaction_id, response->part_id);
 
+  spin_unlock_irqrestore(&rmem_mut, flags);
+
   /* Rate limit ourselves to avoid overwhelming the memory blade */
   //pfa_limit_evict();
-
   //start = pfa_stat_clock();
-
   //end = pfa_stat_clock();
   /* printk("Started sending at: %lld\n", start); */
   /* printk("Send completions at: %lld\n", end); */
 
-  /* ZCopy has to wait for completion (we could memcpy and then transmit
-   * asynchronously, but...meh) */
-  /* printk("rmem_put txid %d, pgid %d\n", txid, pgid); */
-  //txid++;
-  //spin_unlock_irqrestore(&rmem_mut, irq);
-
-  //kfree(hdrs);
-
   // Free all headers and all list entries.
-  while (first_header != NULL) {
-    kfree(first_header->ptr);
-    next_header = first_header->next;
-    kfree(first_header);
-    first_header = next_header;
-  }
-  last_header = NULL;
+  _list_free_all(&headers);
   
   return;
 }
@@ -175,26 +149,23 @@ static void rmem_remote_set(
 
 static void rmem_remote_get_one_block(
     uint8_t *dst_paddr, block_id_t block_id) {
-  //unsigned long irq;
+  unsigned long flags;
+  uint8_t *header = NULL;
+  int num_packets_expected = 0;
+  size_t base_offset = 0;
+  uint32_t transaction_id = 0;
 
-  ///* I'm not sure I have to kmalloc this, but I'm too tired to think about it */
-  //uint64_t *hdr = kmalloc(8, GFP_KERNEL);
-  //PFA_ASSERT(hdr, "Failed to allocate rmem_get headers\n");
-  //
-  //spin_lock_irqsave(&rmem_mut, irq);
- 
-  //*hdr = ((uint64_t)pgid << 16) | txid;
-  
-  uint8_t *header = kcalloc(
-      RMEM_REQUEST_HEADER_SIZE_BYTES, sizeof(uint8_t), 0);
+  // TODO(growly): Hmmmm. Shouldn't this mutex be shared?
+  spin_lock_irqsave(&rmem_mut, flags);
+
+  header = kcalloc(RMEM_REQUEST_HEADER_SIZE_BYTES, sizeof(uint8_t), 0);
 
   insert_ethernet_header(our_mac,
                          blade->mac_address,
                          kMemBladeRequestEtherType,
                          header);
 
-  uint32_t transaction_id = blade->next_transaction_id++;
-
+  transaction_id = blade->next_transaction_id++;
   // TODO(growly): What should the part_id be? 0xFF?
   insert_request_header(RMEM_REQUEST_OP_PAGE_WRITE,
                         0,
@@ -203,9 +174,6 @@ static void rmem_remote_get_one_block(
                         header + ETH_H_LEN + RMEM_BOGUS_ETH_H_PAD_BYTES);
 
   // Give the NIC buffers to receive into.
-
-  int num_packets_expected = 0;
-  size_t base_offset = 0;
   while (base_offset < blade->block_size_bytes) {
     ice_post_recv(nic, dst_paddr + base_offset);
     base_offset += RMEM_MAX_PAYLOAD_BYTES;
@@ -227,8 +195,7 @@ static void rmem_remote_get_one_block(
     --num_packets_expected;
   }
 
-  /* printk("rmem_got txid %d, pgid %d\n", txid, pgid); */
-  //spin_unlock_irqrestore(&rmem_mut, irq);
+  spin_unlock_irqrestore(&rmem_mut, flags);
 
   kfree(header);
   return;
@@ -247,8 +214,9 @@ static void rmem_remote_get(
 void init_remote_memory(uint8_t *blade_mac,
                         size_t block_size_bytes,
                         size_t num_blocks) {
-  BUG_ON(blade != NULL);
+  BUG_ON(blade != NULL || nic != NULL);
   blade = kcalloc(sizeof(MemBladeMetadata), sizeof(uint8_t), 0);
+  spin_lock_init(&rmem_mut);
   nic = ice_init();
 }
 

@@ -39,6 +39,11 @@ typedef struct _SimpleListNode {
   struct _SimpleListNode *next; 
 } SimpleListNode;
 
+typedef struct {
+  SimpleListNode *front;
+  SimpleListNode *back;
+} SimpleList;
+
 // TODO(growly): Import MemBladeRequestMetadata if needed.
 
 // Handle to the (single global) blade.

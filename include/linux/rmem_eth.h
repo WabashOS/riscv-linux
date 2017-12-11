@@ -2,8 +2,8 @@
 
 #include <linux/rmem_defs.h>
 
-int CompareMacAddresses(uint8_t *lhs, uint8_t *rhs);
-void MacAddressToString(uint8_t *mac, char *out);
+int _cmp_mac(uint8_t *lhs, uint8_t *rhs);
+void _mac_str(uint8_t *mac, char *out);
 
 size_t insert_ethernet_header(uint8_t *source_mac,
                               uint8_t *destination_mac,

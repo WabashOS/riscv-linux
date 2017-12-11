@@ -1,20 +1,14 @@
 #include <linux/string.h>
 #include <linux/kernel.h>
 #include <linux/byteorder/generic.h>
-
-//#include <arpa/inet.h>
 #include <linux/if_packet.h>
 #include <uapi/linux/if_ether.h>
-//#include <netinet/ether.h>
-//#include <net/if.h>
 #include <linux/types.h>
-
-//#include <zlib.h>
 
 #include <linux/rmem_defs.h>
 #include <linux/rmem_eth.h>
 
-int CompareMacAddresses(uint8_t *lhs, uint8_t *rhs) {
+int _cmp_mac(uint8_t *lhs, uint8_t *rhs) {
   int i;
   for (i = 0; i < ETH_ALEN; ++i) {
     if (lhs[i] < rhs[i]) {
@@ -28,9 +22,9 @@ int CompareMacAddresses(uint8_t *lhs, uint8_t *rhs) {
 
 // out must be at least 18 bytes long (2 * ETH_ALEN for address, 5 for colons,
 // 1 for nul terminator).
-void MacAddressToString(uint8_t *mac, char *out) {
-  printk("%02x:%02x:%02x:%02x:%02x:%02x",
-         mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+void _mac_str(uint8_t *mac, char *out) {
+  snprintf(out, "%02x:%02x:%02x:%02x:%02x:%02x",
+           mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 }
 
 // Insert an ethernet header starting at *buffer; return the length of the
@@ -57,7 +51,7 @@ size_t insert_ethernet_header(uint8_t *source_mac,
 size_t append_ethernet_fcs(char *buffer, size_t length) {
   uint32_t *fcs = (uint32_t*)(buffer + length);
 
-  // TODO(growly): Compute FCS in Kernel land.
+  // TODO(growly): Compute FCS in Kernel land (I don't think we use it yet).
   //*fcs = (uint32_t)crc32((uLong)0x0, (const Bytef*)buffer, (uInt)length);
 
   // Ok so *fcs is in host order and inserting into the packet _without_
