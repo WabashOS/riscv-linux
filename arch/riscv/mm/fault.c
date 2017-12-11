@@ -45,6 +45,8 @@ asmlinkage void do_page_fault(struct pt_regs *regs)
 	unsigned int flags = FAULT_FLAG_ALLOW_RETRY | FAULT_FLAG_KILLABLE;
 	int fault, code = SEGV_MAPERR;
 
+  /* XXX TFAULT I don't need end_time normally */
+  uint64_t end_time;
   uint64_t start_time = pfa_stat_clock();
 
 	cause = regs->scause;
@@ -54,6 +56,8 @@ asmlinkage void do_page_fault(struct pt_regs *regs)
 	mm = tsk->mm;
 
   if(is_pfa_tsk(current)) {
+    /* XXX TFAULT */
+    printk("Fault started at: %lld\n", start_time);
     pfa_stat_add(n_fault, 1);
   }
 
@@ -181,8 +185,12 @@ good_area:
 	}
 
 	up_read(&mm->mmap_sem);
-  if(is_pfa_tsk(current))
-    pfa_stat_add(t_fault, pfa_stat_clock() - start_time);
+  if(is_pfa_tsk(current)) {
+    /* XXX TFAULT */
+    end_time = pfa_stat_clock();
+    printk("Fault Done: %lld\n", end_time);
+    pfa_stat_add(t_fault, end_time - start_time);
+  }
 	return;
 
 	/*

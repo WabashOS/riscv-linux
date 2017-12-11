@@ -1526,6 +1526,9 @@ static bool try_to_unmap_one(struct page *page, struct vm_area_struct *vma,
 #else
       set_pte_at(mm, address, pvmw.pte, swp_pte);
 #endif
+      /* XXX TFAULT */
+      last_evicted = address;
+
 		} else
 			dec_mm_counter(mm, mm_counter_file(page));
 discard:

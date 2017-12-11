@@ -8,6 +8,9 @@
 #include <linux/mutex.h>
 #include <linux/pfa_stat.h>
 
+/* XXX TFAULT */
+extern uintptr_t last_evicted;
+
 #ifdef CONFIG_PFA_DEBUG
 /* Linux BUG_ON acts really weird (sometimes crashes in strange ways), plus it
  * doesn't print out as much info as I'd like */

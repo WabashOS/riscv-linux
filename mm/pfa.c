@@ -10,6 +10,9 @@
 #include <linux/icenet_raw.h>
 #include "internal.h"
 
+/* XXX TFAULT */
+uintptr_t last_evicted = 0;
+
 /* We rate-limit our evictions since the PFA doesn't right now 
  * Call this right before sending traffic to the memory blade. */
 int64_t outstanding = 0;
@@ -554,6 +557,9 @@ static int kpfad(void *p)
 ssize_t pfa_sysfs_show_tsk(struct kobject *kobj,
     struct kobj_attribute *attr, char *buf)
 {
+  /* XXX TFAULT */
+  printk("reporting %lx\n", last_evicted);
+  return sprintf(buf, "%ld\n", last_evicted);
   int i;
   int line_size = 0;
   int total_size = 0;
@@ -647,6 +653,9 @@ void pfa_clear_tsk(int tsk_id)
 ssize_t pfa_sysfs_show_tsk(struct kobject *kobj,
     struct kobj_attribute *attr, char *buf)
 {
+  /* XXX TFAULT */
+  printk("reporting %lx\n", last_evicted);
+  return sprintf(buf, "%ld\n", last_evicted);
   int i;
   int line_size = 0;
   int total_size = 0;
