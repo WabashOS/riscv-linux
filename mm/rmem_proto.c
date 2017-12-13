@@ -211,16 +211,16 @@ static void rmem_remote_get(
   }
 }
 
-void init_remote_memory(uint8_t *blade_mac,
-                        size_t block_size_bytes,
-                        size_t num_blocks) {
+void remote_init(uint8_t *blade_mac,
+                 size_t block_size_bytes,
+                 size_t num_blocks) {
   BUG_ON(blade != NULL || nic != NULL);
   blade = kcalloc(sizeof(MemBladeMetadata), sizeof(uint8_t), 0);
   spin_lock_init(&rmem_mut);
   nic = ice_init();
 }
 
-void destroy_remote_memory() {
+void remote_destroy() {
   BUG_ON(blade == NULL);
   kfree(blade);
   blade = NULL;

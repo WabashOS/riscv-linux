@@ -15,9 +15,9 @@ typedef uint32_t block_id_t;
 
 // Initialize n block_size-size blocks of remote memory at ethernet address
 // 'blade_mac'. Block IDs are then taken from the range [0, num_blocks).
-void init_remote_memory(
+void remote_init(
     uint8_t *blade_mac, size_t block_size_bytes, size_t num_blocks);
-void destroy_remote_memory(void);
+void remote_destroy(void);
 
 // The remote memory interface defined by
 // https://docs.google.com/document/d/1aTXO8ZXkvyirGcrtxPjf2cqomyVSj6OMbPk14Id2mag
@@ -28,11 +28,11 @@ void remote_get(block_id_t src_block_id, void *dst, size_t n);
 void remote_set(void *src, block_id_t dst_block_id, size_t n);
 
 // Scratchpad initialization.
-void *create_scratchpad(size_t size);
-void destroy_scratchpad(void *scratchpad);
+void *scratch_create(size_t size);
+void scratch_destroy(void *scratchpad);
 
 // Scratchpad malloc (for convenience).
-void *init_scratchpad_malloc(void *scratchpad);
+void *scratch_init(void *scratchpad);
 void *scratch_malloc(void *scratchpad, size_t size);
 void *scratch_realloc(void *scratchpad, size_t size);
 void scratch_free(void *scratchpad, void *ptr);
