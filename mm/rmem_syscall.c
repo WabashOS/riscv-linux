@@ -8,7 +8,7 @@
 // funnelled through here.
 asmlinkage long sys_rmem_op(
      int op, char __user *addr, unsigned long arg0, unsigned long arg1) {
-  printk("rmem_syscall dispatching request %d %p %u %u\n", op, addr, arg0, arg1);
+  //printk("rmem_syscall dispatching request %d %p %u %u\n", op, addr, arg0, arg1);
   switch ((enum SysRmemOpType)op) {
   case RMEM_SYS_OP_INIT:
     // addr: uint8_t blade_mac[6]

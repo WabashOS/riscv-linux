@@ -9,6 +9,12 @@
 #include <linux/spinlock.h>
 #include <uapi/linux/if_ether.h>
 
+#define DEBUG_PRINT 1
+
+#ifndef DEBUG_PRINT
+#define printf(fmt, ...) (0)
+#endif
+
 icenic_t *nic = NULL;
 MemBladeMetadata *blade = NULL;
 spinlock_t rmem_mut;
@@ -79,7 +85,8 @@ static void rmem_remote_set_one_block(uint8_t *src_vaddr, block_id_t block_id) {
         RMEM_REQUEST_HEADER_SIZE_BYTES + payload_size, sizeof(uint8_t), 0);
     // TODO(growly): Make an assertion or remove.
     if (!send_header) {
-      printk("couldn't allocate send header!");
+      printk("ERROR: Couldn't allocate send header!");
+      return;
     }
 
     // Manage header list.
@@ -151,7 +158,7 @@ static void rmem_remote_set_one_block(uint8_t *src_vaddr, block_id_t block_id) {
         memset(recv_header,
                0,
                RMEM_RESPONSE_HEADER_SIZE_BYTES + RMEM_MAX_PAYLOAD_BYTES);
-        printk("not what we wanted.\n");
+        printk("WARN: Response was not what we wanted.\n");
 
         // Prepare for another receive into the same buffer.
         ice_post_recv(nic, virt_to_phys(recv_header));
@@ -191,7 +198,6 @@ static void rmem_remote_set(
   for (; i < n; ++i) {
     uint8_t *src_vaddr = base_vaddr + i * blade->block_size_bytes;
     block_id_t block_id = base_block_id + i;
-    printk("rmem_remote_set_one_block i: %u src_vaddr: %x block_id: %lu", i, src_vaddr, block_id);
     rmem_remote_set_one_block(src_vaddr, block_id);
   }
 }
@@ -250,7 +256,6 @@ static void rmem_remote_get_one_block(
 
   pfa_limit_evict();
 
-  /* printk("rmem_get txid %d, pgid %d\n", txid, pgid); */
   ice_post_send(nic, true, virt_to_phys(send_header),
                 RMEM_REQUEST_HEADER_SIZE_BYTES);
 
@@ -273,7 +278,7 @@ static void rmem_remote_get_one_block(
   for (next = recv_headers.front; next != NULL; next = next->next) {
     struct ethhdr *eth =
         (struct ethhdr*)(next->ptr + RMEM_BOGUS_ETH_H_PAD_BYTES);
-    printk("header %x received eth type: %04x\n", next->ptr, eth->h_proto);
+    // printk("header %x received eth type: %04x\n", next->ptr, eth->h_proto);
     
     MemBladeResponseHeader *response = (MemBladeResponseHeader*)(
         next->ptr + RMEM_BOGUS_ETH_H_PAD_BYTES + ETH_H_LEN);
