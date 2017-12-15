@@ -113,8 +113,15 @@ static void rmem_remote_set_one_block(uint8_t *src_vaddr, block_id_t block_id) {
 
     ice_post_send(nic, false, virt_to_phys(send_header),
                   RMEM_REQUEST_HEADER_SIZE_BYTES);
-    ice_post_send(nic, true, virt_to_phys(src_vaddr) + src_index,
+    ice_post_send(nic, true, virt_to_phys(src_vaddr + src_index),
                   payload_size);
+
+    uint8_t buffer[payload_size];
+    copy_from_user(buffer, src_vaddr + src_index, payload_size);
+    int i;
+    for (i = 0; i < 32; i++) {
+      printk("%02x ", buffer[i]);
+    }
 
     // TODO(growly): Have to make sure the entire packet is 8-byte aligned if
     // appending FCS.
@@ -278,7 +285,7 @@ static void rmem_remote_get_one_block(
            response->common.version, response->common.code,
            response->transaction_id, response->part_id, length);
 
-    copy_to_user(dst_vaddr,
+    copy_to_user(dst_vaddr + response->part_id * RMEM_MAX_PAYLOAD_BYTES,
                  next->ptr + RMEM_RESPONSE_HEADER_SIZE_BYTES,
                  length);
   }

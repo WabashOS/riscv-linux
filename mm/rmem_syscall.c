@@ -1,6 +1,6 @@
-#include <linux/remote_scratchpad.h>
 #include <linux/syscalls.h>
 #include <linux/types.h>
+#include <linux/remote_scratchpad.h>
 #include <linux/rmem_defs.h>
 #include <uapi/asm-generic/errno.h>
 
