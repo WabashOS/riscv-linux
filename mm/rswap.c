@@ -102,10 +102,8 @@ static int pg_cmp(uint64_t *p1, uint64_t *p2)
 static void rmem_put(uintptr_t src_vaddr, uint32_t pgid)
 {
   uint64_t start, end;
- 
-  pfa_limit_evict();
-
   start = pfa_stat_clock();
+  /* pfa_limit_evict() occurs in here now. */
   remote_set(src_vaddr, pgid, 1);
   end = pfa_stat_clock();
   /* printk("Started sending at: %lld\n", start); */
@@ -116,7 +114,10 @@ static void rmem_put(uintptr_t src_vaddr, uint32_t pgid)
 
 static void rmem_get(uintptr_t dst_vaddr, uint32_t pgid)
 {
+  uint64_t start, end;
+  start = pfa_stat_clock();
   remote_get(pgid, dst_vaddr, 1);
+  end = pfa_stat_clock();
   return;
 }
 

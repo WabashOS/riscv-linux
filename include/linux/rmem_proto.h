@@ -10,9 +10,10 @@
 // bogus 2 bytes just because.
 //
 // Header should be ETH_H_LEN + 2 + sizeof(MemBladeRequestHeader)
-//                     14     + 2 +               12               = 28 bytes
+//                     14     + 2 +               16               = 32 bytes
 #define ETH_H_LEN 14
-#define RMEM_REQUEST_HEADER_SIZE_BYTES 28
+#define RMEM_REQUEST_HEADER_SIZE_BYTES 32
+//#define RMEM_REQUEST_HEADER_SIZE_BYTES 64
 #define RMEM_RESPONSE_HEADER_SIZE_BYTES 24
 #define RMEM_BOGUS_ETH_H_PAD_BYTES 2
 

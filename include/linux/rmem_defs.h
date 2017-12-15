@@ -5,7 +5,6 @@
 #define PROTOCOL_VERSION 0x00
 
 #define RMEM_REQUEST_ALL_PARTS 0xFF
-
 #define RMEM_MAX_PAYLOAD_BYTES 1368
 
 // The ethertype of the memory blade protocol.
@@ -47,7 +46,9 @@ typedef struct {
   MemBladeCommonHeader common;
   uint8_t part_id;  // 0xFF = send all parts.
   uint8_t reserved;
-  uint32_t page_number; // This is the block ID in network byte order.
+  // TODO(growly): This was actually 8 bytes, not 32, to get it to 8-byte
+  // alignment. Make sure this is reflected everywhere.
+  uint64_t page_number; // This is the block ID in network byte order.
   uint32_t transaction_id;  // Network byte order.
 } __attribute__((packed)) MemBladeRequestHeader;
 

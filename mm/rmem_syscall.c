@@ -14,11 +14,11 @@ asmlinkage long sys_rmem_op(
     // addr: uint8_t blade_mac[6]
     // arg0: size_t block_size_bytes
     // arg1: size_t num_blocks
-    init_remote_memory((uint8_t*)addr, (size_t)arg0, (size_t)arg1);
+    remote_init((uint8_t*)addr, (size_t)arg0, (size_t)arg1);
     break;
   case RMEM_SYS_OP_DESTROY:
     // No args.
-    destroy_remote_memory();
+    remote_destroy();
     break;
   case RMEM_SYS_OP_SET:
     // addr: void *src

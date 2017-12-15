@@ -33,7 +33,7 @@ void _mac_str(uint8_t *mac, char *out) {
 size_t insert_ethernet_header(uint8_t *source_mac,
                               uint8_t *destination_mac,
                               uint16_t ether_type,
-                              char *buffer) {
+                              uint8_t *buffer) {
   int i;
   //assert(sizeof(struct ether_header) == ETH_HLEN);
   struct ethhdr *eth = (struct ethhdr*)buffer;
@@ -44,11 +44,12 @@ size_t insert_ethernet_header(uint8_t *source_mac,
   for (i = 0; i < ETH_ALEN; ++i) {
     eth->h_dest[i] = destination_mac[i];
   }
-  eth->h_proto = htons(ether_type);
+  //eth->h_proto = htons(ether_type);
+  eth->h_proto = ether_type;
   return ETH_HLEN;
 }
 
-size_t append_ethernet_fcs(char *buffer, size_t length) {
+size_t append_ethernet_fcs(uint8_t *buffer, size_t length) {
   uint32_t *fcs = (uint32_t*)(buffer + length);
 
   // TODO(growly): Compute FCS in Kernel land (I don't think we use it yet).
@@ -71,25 +72,28 @@ size_t insert_request_header(enum MemBladeRequestOpCode op_code,
                              uint8_t part_id,
                              uint32_t page_number,
                              uint32_t transaction_id,
-                             char *buffer) {
+                             uint8_t *buffer) {
   MemBladeRequestHeader *request_header = (MemBladeRequestHeader*)buffer;
   request_header->common.version = PROTOCOL_VERSION;
   request_header->common.code = (uint8_t)op_code;
   request_header->part_id = part_id;
-  request_header->page_number = htonl(page_number);
-  request_header->transaction_id = htonl(transaction_id);
+  //request_header->page_number = __builtin_bswap64(page_number);
+  //request_header->transaction_id = htonl(transaction_id);
+  request_header->page_number = page_number;
+  request_header->transaction_id = transaction_id;
   return sizeof(MemBladeRequestHeader);
 }
 
 size_t insert_response_header(enum MemBladeResponseCode response_code,
                               uint8_t part_id,
                               uint32_t transaction_id,
-                              char *buffer) {
+                              uint8_t *buffer) {
   MemBladeResponseHeader *response_header = (MemBladeResponseHeader*)buffer;
   response_header->common.version = PROTOCOL_VERSION;
   response_header->common.code = (uint8_t)response_code;
   response_header->part_id = part_id;
-  response_header->transaction_id = htonl(transaction_id);
+  //response_header->transaction_id = htonl(transaction_id);
+  response_header->transaction_id = transaction_id;
   return sizeof(MemBladeResponseHeader);
 }
 
