@@ -4,7 +4,7 @@
 
 #define PROTOCOL_VERSION 0x00
 
-#define RMEM_REQUEST_ALL_PARTS 0xFF
+#define RMEM_REQUEST_ALL_PARTS 0x00
 #define RMEM_MAX_PAYLOAD_BYTES 1368
 
 // The ethertype of the memory blade protocol.
