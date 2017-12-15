@@ -70,9 +70,13 @@ static void rmem_remote_set_one_block(uint8_t *src_vaddr, block_id_t block_id) {
   data_to_request = blade->block_size_bytes;
   part = 0;
   while (data_to_request > 0) {
+    transaction_id = blade->next_transaction_id++;
+    payload_size = min(data_to_request, RMEM_MAX_PAYLOAD_BYTES);
+    src_index = part * RMEM_MAX_PAYLOAD_BYTES;
+
     // Build header to send remaining bytes.
     send_header = (uint8_t*)kcalloc(
-        RMEM_REQUEST_HEADER_SIZE_BYTES, sizeof(uint8_t), 0);
+        RMEM_REQUEST_HEADER_SIZE_BYTES + payload_size, sizeof(uint8_t), 0);
     // TODO(growly): Make an assertion or remove.
     if (!send_header) {
       printk("couldn't allocate send header!");
@@ -83,15 +87,11 @@ static void rmem_remote_set_one_block(uint8_t *src_vaddr, block_id_t block_id) {
 
     // Set up buffer for the response.
     recv_header = kcalloc(
-        RMEM_RESPONSE_HEADER_SIZE_BYTES + RMEM_MAX_PAYLOAD_BYTES,
+        RMEM_RESPONSE_HEADER_SIZE_BYTES,
         sizeof(uint8_t),
         0);
 
     _list_enqueue(&recv_headers, recv_header);
-
-    transaction_id = blade->next_transaction_id++;
-    payload_size = min(data_to_request, RMEM_MAX_PAYLOAD_BYTES);
-    src_index = part * RMEM_MAX_PAYLOAD_BYTES;
 
     insert_ethernet_header(our_mac,
                            //blade->mac_address,
@@ -105,23 +105,25 @@ static void rmem_remote_set_one_block(uint8_t *src_vaddr, block_id_t block_id) {
                           transaction_id,
                           send_header + ETH_H_LEN + RMEM_BOGUS_ETH_H_PAD_BYTES);
 
+    // Copy user data to payload. See TODO below.
+    copy_from_user(send_header + RMEM_REQUEST_HEADER_SIZE_BYTES,
+                   src_vaddr + src_index,
+                   payload_size);
+
     printk("request op: %02x part: %u page: %u txn: %u payload %u\n",
            RMEM_REQUEST_OP_PAGE_WRITE, part, block_id, transaction_id,
            payload_size);
      
     ice_post_recv(nic, virt_to_phys(recv_header));
 
-    ice_post_send(nic, false, virt_to_phys(send_header),
-                  RMEM_REQUEST_HEADER_SIZE_BYTES);
-    ice_post_send(nic, true, virt_to_phys(src_vaddr + src_index),
-                  payload_size);
+    ice_post_send(nic, true, virt_to_phys(send_header),
+                  RMEM_REQUEST_HEADER_SIZE_BYTES + payload_size);
 
-    uint8_t buffer[payload_size];
-    copy_from_user(buffer, src_vaddr + src_index, payload_size);
-    int i;
-    for (i = 0; i < 32; i++) {
-      printk("%02x ", buffer[i]);
-    }
+    // TODO(growly): We can only virt_to_phys() kmalloc'd memory; we would
+    // need to set up an mmap'd (cough, scratchpad) to copy direct from user
+    // space. But we haven't done that, so we'll just copy_from_user for now.
+    //ice_post_send(nic, true, virt_to_phys(src_vaddr + src_index),
+    //              payload_size);
 
     // TODO(growly): Have to make sure the entire packet is 8-byte aligned if
     // appending FCS.
@@ -139,8 +141,6 @@ static void rmem_remote_set_one_block(uint8_t *src_vaddr, block_id_t block_id) {
 
     for (;;) {
       pfa_limit_evict();
-
-      printk("waiting for response\n");
 
       ice_recv_one(nic);
 
