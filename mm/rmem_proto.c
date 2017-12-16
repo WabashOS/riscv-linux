@@ -73,6 +73,16 @@ static void rmem_remote_set_one_block(uint8_t *src_vaddr, block_id_t block_id) {
   // TODO(growly): Is this locking too aggressive?
   spin_lock_irqsave(&rmem_mut, flags);
 
+  // Set up buffer for the response.
+  recv_header = kcalloc(
+      RMEM_RESPONSE_HEADER_SIZE_BYTES,
+      sizeof(uint8_t),
+      0);
+
+  _list_enqueue(&recv_headers, recv_header);
+
+  ice_post_recv(nic, virt_to_phys(recv_header));
+
   data_to_request = blade->block_size_bytes;
   part = 0;
   while (data_to_request > 0) {
@@ -91,14 +101,6 @@ static void rmem_remote_set_one_block(uint8_t *src_vaddr, block_id_t block_id) {
 
     // Manage header list.
     _list_enqueue(&send_headers, send_header);
-
-    // Set up buffer for the response.
-    recv_header = kcalloc(
-        RMEM_RESPONSE_HEADER_SIZE_BYTES,
-        sizeof(uint8_t),
-        0);
-
-    _list_enqueue(&recv_headers, recv_header);
 
     insert_ethernet_header(our_mac,
                            //blade->mac_address,
@@ -121,7 +123,6 @@ static void rmem_remote_set_one_block(uint8_t *src_vaddr, block_id_t block_id) {
            RMEM_REQUEST_OP_PAGE_WRITE, part, block_id, transaction_id,
            payload_size);
      
-    ice_post_recv(nic, virt_to_phys(recv_header));
 
     ice_post_send(nic, true, virt_to_phys(send_header),
                   RMEM_REQUEST_HEADER_SIZE_BYTES + payload_size);
@@ -145,36 +146,36 @@ static void rmem_remote_set_one_block(uint8_t *src_vaddr, block_id_t block_id) {
     data_to_request -= payload_size;
 
     ice_drain_sendq(nic);
-
-    for (;;) {
-      pfa_limit_evict();
-
-      ice_recv_one(nic);
-
-      struct ethhdr *eth =
-          (struct ethhdr*)(recv_header + RMEM_BOGUS_ETH_H_PAD_BYTES);
-
-      if (eth->h_proto != kMemBladeResponseEtherType) {
-        memset(recv_header,
-               0,
-               RMEM_RESPONSE_HEADER_SIZE_BYTES + RMEM_MAX_PAYLOAD_BYTES);
-        printk("WARN: Response was not what we wanted.\n");
-
-        // Prepare for another receive into the same buffer.
-        ice_post_recv(nic, virt_to_phys(recv_header));
-        continue;
-      }
-      
-      MemBladeResponseHeader *response = (MemBladeResponseHeader*)(
-          recv_header + RMEM_BOGUS_ETH_H_PAD_BYTES + ETH_H_LEN);
-
-      printk("blade response: ver: %02x code: %02x txn: %u part: %u",
-             response->common.version, response->common.code,
-             response->transaction_id, response->part_id);
-      break;
-    }
-    pfa_limit_evict();
   }
+
+  for (;;) {
+    pfa_limit_evict();
+
+    ice_recv_one(nic);
+
+    struct ethhdr *eth =
+	(struct ethhdr*)(recv_header + RMEM_BOGUS_ETH_H_PAD_BYTES);
+
+    if (ntohs(eth->h_proto) != kMemBladeResponseEtherType) {
+      memset(recv_header,
+	     0,
+	     RMEM_RESPONSE_HEADER_SIZE_BYTES + RMEM_MAX_PAYLOAD_BYTES);
+      printk("WARN: Response was not what we wanted.\n");
+
+      // Prepare for another receive into the same buffer.
+      ice_post_recv(nic, virt_to_phys(recv_header));
+      continue;
+    }
+
+    MemBladeResponseHeader *response = (MemBladeResponseHeader*)(
+	recv_header + RMEM_BOGUS_ETH_H_PAD_BYTES + ETH_H_LEN);
+
+    printk("blade response: ver: %02x code: %02x txn: %u part: %u",
+	   response->common.version, response->common.code,
+	   response->transaction_id, response->part_id);
+    break;
+  }
+  pfa_limit_evict();
 
   spin_unlock_irqrestore(&rmem_mut, flags);
 

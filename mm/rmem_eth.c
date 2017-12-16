@@ -44,8 +44,8 @@ size_t insert_ethernet_header(uint8_t *source_mac,
   for (i = 0; i < ETH_ALEN; ++i) {
     eth->h_dest[i] = destination_mac[i];
   }
-  //eth->h_proto = htons(ether_type);
-  eth->h_proto = ether_type;
+  eth->h_proto = htons(ether_type);
+  //eth->h_proto = ether_type;
   return ETH_HLEN;
 }
 
