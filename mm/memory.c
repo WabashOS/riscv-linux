@@ -70,6 +70,7 @@
 #include <linux/userfaultfd_k.h>
 #include <linux/dax.h>
 #include <linux/oom.h>
+#include <linux/pfa.h>
 
 #include <asm/io.h>
 #include <asm/mmu_context.h>
@@ -1301,8 +1302,27 @@ again:
 		if (pte_none(ptent))
 			continue;
 
+#ifdef CONFIG_PFA
+    /* This is not a complete solution, but it reduces the number of errors 
+     * NOTE: we can't check for pfa_tsk here because it's already been cleaned
+     * up (in do_exit). */
+    if (pte_remote(ptent)) {
+      set_pte(pte, swp_entry_to_pte(pfa_remote_to_swp(ptent)));
+      ptent = *pte;
+      pfa_trace("Dropping remote page: (vaddr=0x%lx) (pte=0x%lx)\n", addr, pte_val(ptent));
+    }
+#endif
+    
 		if (pte_present(ptent)) {
 			struct page *page;
+#ifdef CONFIG_PFA
+      if (unlikely(pte_fetched(ptent))) {
+        /* panic("Seeing fetched page after process shutdown.\n"); */
+        /* This isn't ideal, but I don't know why these are happening and
+         * they aren't really fatal */
+        panic("Seeing fetched page after process shutdown.\n");
+     }
+#endif
 
 			page = _vm_normal_page(vma, addr, ptent, true);
 			if (unlikely(details) && page) {
@@ -1367,6 +1387,12 @@ again:
 		/* If details->check_mapping, we leave swap entries. */
 		if (unlikely(details))
 			continue;
+
+#ifdef CONFIG_PFA
+    BUG_ON(pte_val(ptent) != pte_val(*pte));
+    BUG_ON(pte_remote(ptent));
+    BUG_ON(pte_present(ptent) && pte_fetched(ptent));
+#endif
 
 		entry = pte_to_swp_entry(ptent);
 		if (!non_swap_entry(entry))
@@ -3936,9 +3962,35 @@ static int handle_pte_fault(struct vm_fault *vmf)
 		else
 			return do_fault(vmf);
 	}
+  
+#ifdef CONFIG_PFA
+  if(pte_remote(vmf->orig_pte)) {
+    return pfa_handle_fault(vmf);
+  } else if (pte_fetched(vmf->orig_pte)) {
+    /* This page hasn't been bookkeeped yet, process it before doing rest of
+     * fault handling */
+    pfa_lock(global);
+    if(!is_pfa_tsk(current)) {
+      panic("Seeing fetched page for non-pfa task.");
+    } else {
+      pfa_stat_add(n_early_newq, 1);
+      pfa_drain_newq(current->pfa_tsk_id);
+      vmf->orig_pte = *vmf->pte;
+    }
+    pfa_unlock(global);
+  }
+#endif
 
-	if (!pte_present(vmf->orig_pte))
-		return do_swap_page(vmf);
+	if (!pte_present(vmf->orig_pte)) {
+    int ret;
+    uint64_t start = pfa_stat_clock();
+		ret = do_swap_page(vmf);
+    if(is_pfa_tsk(current)) {
+      pfa_stat_add(t_bookkeeping, pfa_stat_clock() - start);
+      pfa_stat_add(n_swapfault, 1);
+    }
+    return ret;
+  }
 
 	if (pte_protnone(vmf->orig_pte) && vma_is_accessible(vmf->vma))
 		return do_numa_page(vmf);

@@ -64,6 +64,7 @@
 #include <linux/backing-dev.h>
 #include <linux/page_idle.h>
 #include <linux/memremap.h>
+#include <linux/pfa.h>
 
 #include <asm/tlbflush.h>
 
@@ -1567,7 +1568,22 @@ static bool try_to_unmap_one(struct page *page, struct vm_area_struct *vma,
 			swp_pte = swp_entry_to_pte(entry);
 			if (pte_soft_dirty(pteval))
 				swp_pte = pte_swp_mksoft_dirty(swp_pte);
-			set_pte_at(mm, address, pvmw.pte, swp_pte);
+
+      pfa_stat_add(n_evicted, 1);
+#ifdef CONFIG_PFA
+      pfa_evict(entry, page_to_phys(page), address, current);
+      /* XXX PFA HW We pre-emptively set both dirty
+       * and accessed to avoid extra page faults (the PFA should really do this). */
+      pteval = pte_mkdirty(pteval);
+      pteval = pte_mkyoung(pteval);
+
+      /* The pgprot matches the evicted page. */
+      pteval = pfa_mk_remote_pte(entry, __pgprot(pte_val(pteval) & 0x3FF),
+          current->pfa_tsk_id);
+      set_pte_at(mm, address, pvmw.pte, pteval);
+#else
+      set_pte_at(mm, address, pvmw.pte, swp_pte);
+#endif
 			/* Invalidate as we cleared the pte */
 			mmu_notifier_invalidate_range(mm, address,
 						      address + PAGE_SIZE);

@@ -32,6 +32,12 @@
 #define _PAGE_DIRTY     (1 << 7)    /* Set by hardware on any write */
 #define _PAGE_SOFT      (1 << 8)    /* Reserved for software */
 
+/* Remote bit only valid if the PTE is marked invalid (_PAGE_PRESENT is clear)
+ * See linux/pfa.h for details of remote PTE format */
+#define _PAGE_REMOTE    (1 << 1)
+/* Page has been fetched by the PFA but not yet processed by bookkeeping */
+#define _PAGE_FETCHED   (1 << 9)
+
 #define _PAGE_SPECIAL   _PAGE_SOFT
 #define _PAGE_TABLE     _PAGE_PRESENT
 
