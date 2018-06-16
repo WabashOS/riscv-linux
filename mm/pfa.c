@@ -411,10 +411,7 @@ void pfa_frameq_push(struct page *frame)
 {
   pfa_assert_lock(global);
   PFA_ASSERT(pfa_frameq_size != PFA_FRAMEQ_MAX, "Pushing to full frameq\n");
-
-#ifdef CONFIG_PFA_DEBUG
   PFA_ASSERT(!pfa_frameq_search(page_to_phys(frame)), "Frame already on frameq\n");
-#endif
 
   pfa_frameq[pfa_frameq_head] = frame;
 

@@ -2924,7 +2924,13 @@ int do_swap_page(struct vm_fault *vmf)
 		if (si->flags & SWP_SYNCHRONOUS_IO &&
 				__swap_count(si, entry) == 1) {
 			/* skip swapcache */
+#ifdef CONFIG_PFA
+      page = pfa_frameq_pop();
+    
+      PFA_ASSERT(page, "Nothing returned by frameq");
+#else
 			page = alloc_page_vma(GFP_HIGHUSER_MOVABLE, vma, vmf->address);
+#endif
 			if (page) {
 				__SetPageLocked(page);
 				__SetPageSwapBacked(page);
