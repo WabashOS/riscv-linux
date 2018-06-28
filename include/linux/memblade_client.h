@@ -7,7 +7,7 @@
 #define MB_OC_ATOMIC_ADD 4
 #define MB_OC_COMP_SWAP 5
 
-#define MB_BASE       0x10016000L
+#define MB_BASE       0x10018000L
 #define MB_SRC_ADDR   (MB_BASE + 0x00)
 #define MB_DST_ADDR   (MB_BASE + 0x08)
 #define MB_DSTMAC     (MB_BASE + 0x10)
