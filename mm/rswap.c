@@ -10,6 +10,7 @@
 #include <linux/delay.h>
 #include <linux/pfa.h>
 #include <linux/pfa_stat.h>
+#include <linux/memblade_client.h>
 #include <linux/icenet_raw.h>
 
 /* #undef RSWAP_DEBUG */
@@ -102,84 +103,25 @@ static int pg_cmp(uint64_t *p1, uint64_t *p2)
   return 1;
 }
 
-/* ZCopy Interface to memory blade */
+/* Use memblade client HW to directly put a page into rmem */
 static void rmem_put(uintptr_t src_paddr, uint32_t pgid)
 {
   unsigned long irq;
-  uint64_t *hdrs;
-  uint64_t start, end;
-  
   spin_lock_irqsave(&rmem_mut, irq);
- 
-  /* Command headers 
-   * I'm not sure I have to kmalloc these, but I'm too tired to think about it */
-  hdrs = kmalloc(3*sizeof(uint64_t), GFP_KERNEL);
-  PFA_ASSERT(hdrs, "Failed to allocate rmem_get headers\n");
+
+  mb_send(src_paddr, (uintptr_t)NULL, MB_OC_PAGE_WRITE, pgid);
+  mb_wait();
   
-  hdrs[0] = 0x100000000000000 | ((uint64_t)pgid << 16) | txid;
-  hdrs[1] = 0x101000000000000 | ((uint64_t)pgid << 16) | txid;
-  hdrs[2] = 0x102000000000000 | ((uint64_t)pgid << 16) | txid;
-
-  /* Rate limit ourselves to avoid overwhelming the memory blade */
-  pfa_limit_evict();
-
-  start = pfa_stat_clock();
-  ice_post_send(nic, false, virt_to_phys(&hdrs[0]), 8); 
-  ice_post_send(nic, true,  src_paddr, 1368);
-
-  ice_post_send(nic, false, virt_to_phys(&hdrs[1]), 8); 
-  ice_post_send(nic, true,  src_paddr + 1368, 1368);
-
-  ice_post_send(nic, false, virt_to_phys(&hdrs[2]), 8); 
-  ice_post_send(nic, true,  src_paddr + 2*1368, 1360);
-
-  ice_drain_sendq(nic);
-  end = pfa_stat_clock();
-  /* printk("Started sending at: %lld\n", start); */
-  /* printk("Send completions at: %lld\n", end); */
-
-  /* ZCopy has to wait for completion (we could memcpy and then transmit
-   * asynchronously, but...meh) */
-  /* printk("rmem_put txid %d, pgid %d\n", txid, pgid); */
-  txid++;
   spin_unlock_irqrestore(&rmem_mut, irq);
-
-  kfree(hdrs);
-  
-  return;
 }
 
 static void rmem_get(uintptr_t dest_paddr, uint32_t pgid)
 {
   unsigned long irq;
-
-  /* I'm not sure I have to kmalloc this, but I'm too tired to think about it */
-  uint64_t *hdr = kmalloc(8, GFP_KERNEL);
-  PFA_ASSERT(hdr, "Failed to allocate rmem_get headers\n");
-  
   spin_lock_irqsave(&rmem_mut, irq);
- 
-  *hdr = ((uint64_t)pgid << 16) | txid;
-
-  /* MemBlade will respond with 3 packets forming one page */
-  ice_post_recv(nic, dest_paddr);
-  ice_post_recv(nic, dest_paddr + 1368);
-  ice_post_recv(nic, dest_paddr + 2*1368);
-
-  /* printk("rmem_get txid %d, pgid %d\n", txid, pgid); */
-  ice_post_send(nic, true, virt_to_phys(hdr), 8);
-  ice_drain_sendq(nic);
- 
-  /* Block until all packets received */
-  ice_recv_one(nic);
-  ice_recv_one(nic);
-  ice_recv_one(nic);
-  txid++;
-  /* printk("rmem_got txid %d, pgid %d\n", txid, pgid); */
+  mb_send((uintptr_t)NULL, dest_paddr, MB_OC_PAGE_READ, pgid);
+  mb_wait();
   spin_unlock_irqrestore(&rmem_mut, irq);
-
-  kfree(hdr);
-  return;
 }
 
 /* This is a unit test for the RMEM interface. You don't need (and probably
@@ -290,6 +232,7 @@ static int rswap_frontswap_store(unsigned type, pgoff_t offset,
   void *page_vaddr;
   bool created_rpage;
   int cpu;
+  uint64_t start;
 
 #ifdef CONFIG_PFA
   /* for PFA, we actually store the page during try_to_unmap_one */
@@ -303,7 +246,7 @@ static int rswap_frontswap_store(unsigned type, pgoff_t offset,
   /* printk("Done storing: pgid=%ld\n", offset); */
   return 0;
 #endif
-  uint64_t start = pfa_stat_clock();
+  start = pfa_stat_clock();
 
   /* In non-pfa mode, we introduce a configurable delay to simulate NW access */
   ndelay(RMEM_WRITE_LAT);
@@ -446,10 +389,11 @@ static void rswap_frontswap_init(unsigned type)
 
 #ifdef CONFIG_PFA_SW_RMEM
   spin_lock_init(&rmem_mut);
-  nic = ice_init();
-  /* if(!rmem_unit_test()) { */
-  /*   printk("RMEM doesn't work, don't swap you fools!!!\n"); */
-  /* } */
+  mb_init();
+
+  if(!rmem_unit_test()) {
+    printk("RMEM doesn't work, don't swap you fools!!!\n");
+  }
 #else
   init_rswap_pages(REMOTE_BUF_SIZE);
 #endif
