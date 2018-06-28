@@ -486,6 +486,13 @@ config FRONTSWAP
 
 	  If unsure, say Y to enable frontswap.
 
+menu MEMBLADE
+config MEMBLADE_MAC
+  int "MAC address of remote memory blade"
+  default 0
+    
+endmenu
+
 menu PFA
 config PFA
   bool "Enable Page-Fault Accelerator (requires HW support)"

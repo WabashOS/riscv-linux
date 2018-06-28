@@ -46,5 +46,5 @@ void mb_init(void)
   mb_io_nresp = ioremap(MB_NRESP, 4);
 
   /* Hard-coded for now for Spike loopback model, need to fix for real HW */
-  mb_dstmac = 0;
+  mb_dstmac = CONFIG_MEMBLADE_MAC;
 }

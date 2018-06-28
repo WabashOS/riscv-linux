@@ -376,7 +376,7 @@ static void rswap_frontswap_invalidate_area(unsigned type)
 {
 #ifdef CONFIG_PFA
   return;
-#elif defined CONFIG_SW_RMEM
+#elif defined CONFIG_PFA_SW_RMEM
   return;
 #endif
   pr_err("rswap_frontswap_invalidate_area\n");
