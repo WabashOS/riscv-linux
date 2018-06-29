@@ -46,7 +46,6 @@ void pfa_limit_evict(void)
 #ifdef CONFIG_PFA
 
 /* Phyiscal addr for MMIO to pfa */
-/* #define PFA_IO_BASE           0x2000 */
 #define PFA_IO_BASE                0x10017000 
 #define PFA_IO_FREEFRAME           (PFA_IO_BASE)
 #define PFA_IO_FREESTAT            (PFA_IO_BASE + 8)
@@ -55,7 +54,6 @@ void pfa_limit_evict(void)
 #define PFA_IO_NEWPGID             (PFA_IO_BASE + 32)
 #define PFA_IO_NEWVADDR            (PFA_IO_BASE + 40)
 #define PFA_IO_NEWSTAT             (PFA_IO_BASE + 48)
-#define PFA_IO_INITMEM             (PFA_IO_BASE + 56)
 
 DEFINE_MUTEX(pfa_mutex_global);
 DEFINE_MUTEX(pfa_mutex_evict);
@@ -79,7 +77,6 @@ void __iomem *pfa_io_evictstat;
 void __iomem *pfa_io_newpgid;
 void __iomem *pfa_io_newvaddr;
 void __iomem *pfa_io_newstat;
-void __iomem *pfa_io_initmem;
 
 /* Holds every frame (struct page*) that is given to the PFA in FIFO order */
 #define PFA_FRAMEQ_MAX (CONFIG_PFA_FREEQ_SIZE + CONFIG_PFA_NEWQ_SIZE)
@@ -155,12 +152,6 @@ void pfa_init(void)
   pfa_io_newpgid = ioremap(PFA_IO_NEWPGID, 8);
   pfa_io_newvaddr = ioremap(PFA_IO_NEWVADDR, 8);
   pfa_io_newstat = ioremap(PFA_IO_NEWSTAT, 8);
-  pfa_io_initmem = ioremap(PFA_IO_INITMEM, 8);
-
-  /* Provide a scratch area to the PFA 
-   * We never free this page after allocating */
-  pfa_scratch = alloc_page(GFP_KERNEL);
-  writeq(page_to_phys(pfa_scratch), pfa_io_initmem); 
 
   return;
 }
