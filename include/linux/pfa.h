@@ -32,6 +32,9 @@
 #define pfa_warn(M, ...) printk("PFA_WARNING: " M, ##__VA_ARGS__)
 // #define pfa_warn(M, ...) 
 
+/* Returns the MAC address of the memory blade to use, given the current NIC's mac */
+#define pfa_dstmac(LOOPBACK_MAC) (LOOPBACK_MAC)
+
 /* We rate-limit our evictions since the PFA doesn't right now 
  * Call this right before sending traffic to the memory blade. */
 void pfa_limit_evict(void);

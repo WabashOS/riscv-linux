@@ -156,7 +156,7 @@ void pfa_init(uint64_t memblade_mac)
   pfa_io_dstmac = ioremap(PFA_IO_DSTMAC, 8);
 
   /* PFA currently only supports one memoryblade, statically configured */
-  writeq(memblade_mac, pfa_io_dstmac);
+  writeq(pfa_dstmac(memblade_mac), pfa_io_dstmac);
 
   return;
 }
