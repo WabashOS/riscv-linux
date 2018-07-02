@@ -99,5 +99,7 @@ icenic_t *ice_init(void)
   nic->recvq_max = recv_req_avail(nic);
   nic->sendq_max = send_req_avail(nic);
 
+  nic->mac = ioread64(nic->iomem + ICENET_MACADDR);
+
   return nic;
 }

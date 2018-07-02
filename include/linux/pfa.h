@@ -103,8 +103,9 @@ static inline int __pfa_trylock(const char *file, int line, struct mutex *lock) 
       panic("pfa_assert_lock"); \
   } while(0)
 
-/* initialize the system, only call once! */
-void pfa_init(void);
+/* initialize the system, only call once!
+ * memblade_mac - MAC address for the memory blade to use (configured only once) */
+void pfa_init(uint64_t memblade_mac);
 
 /* Evict a page to the pfa. */
 void pfa_evict(swp_entry_t swp_ent, uintptr_t page_paddr, uintptr_t vaddr,
@@ -222,8 +223,10 @@ static inline struct task_struct *pfa_get_tsk(int tsk_id)
 
 #else //ifdef CONFIG_PFA
 
-/* initialize the system, only call once! */
-void pfa_init(void);
+/* initialize the system, only call once!
+ * memblade_mac - MAC address for the memory blade to use (configured only once) */
+void pfa_init(uint64_t memblade_mac);
+
 
 /* The PFA can only work for one task at a time right now. 
  * NULL if no one has registered with the PFA. */

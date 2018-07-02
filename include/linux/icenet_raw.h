@@ -5,6 +5,7 @@ typedef struct icenic {
 	void __iomem *iomem;
   size_t sendq_max;
   size_t recvq_max;
+  uint64_t mac;
 } icenic_t;
 
 /* Send a segment out the NIC.

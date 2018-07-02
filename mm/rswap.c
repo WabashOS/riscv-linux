@@ -384,12 +384,10 @@ static void rswap_frontswap_invalidate_area(unsigned type)
 
 static void rswap_frontswap_init(unsigned type)
 {
-  pfa_init();
-  pfa_stat_init();
-
 #ifdef CONFIG_PFA_SW_RMEM
   spin_lock_init(&rmem_mut);
   mb_init();
+  nic = ice_init();
 
   if(!rmem_unit_test()) {
     printk("RMEM doesn't work, don't swap you fools!!!\n");
@@ -397,6 +395,9 @@ static void rswap_frontswap_init(unsigned type)
 #else
   init_rswap_pages(REMOTE_BUF_SIZE);
 #endif
+
+  pfa_init(nic->mac);
+  pfa_stat_init();
 
   pr_info("rswap_frontswap_init end\n");
 }

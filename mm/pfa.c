@@ -45,7 +45,7 @@ void pfa_limit_evict(void)
 
 #ifdef CONFIG_PFA
 
-/* Phyiscal addr for MMIO to pfa */
+/* Phyiscal addr for MMIO to pfa (see the PFA spec for details) */
 #define PFA_IO_BASE                0x10017000 
 #define PFA_IO_FREEFRAME           (PFA_IO_BASE)
 #define PFA_IO_FREESTAT            (PFA_IO_BASE + 8)
@@ -54,6 +54,7 @@ void pfa_limit_evict(void)
 #define PFA_IO_NEWPGID             (PFA_IO_BASE + 32)
 #define PFA_IO_NEWVADDR            (PFA_IO_BASE + 40)
 #define PFA_IO_NEWSTAT             (PFA_IO_BASE + 48)
+#define PFA_IO_DSTMAC              (PFA_IO_BASE + 56)
 
 DEFINE_MUTEX(pfa_mutex_global);
 DEFINE_MUTEX(pfa_mutex_evict);
@@ -132,7 +133,7 @@ static void pfa_evict_poll(void);
 static int kpfad(void *p);
 #endif
 
-void pfa_init(void)
+void pfa_init(uint64_t memblade_mac)
 {
   struct page *pfa_scratch;
 
@@ -152,6 +153,10 @@ void pfa_init(void)
   pfa_io_newpgid = ioremap(PFA_IO_NEWPGID, 8);
   pfa_io_newvaddr = ioremap(PFA_IO_NEWVADDR, 8);
   pfa_io_newstat = ioremap(PFA_IO_NEWSTAT, 8);
+  pfa_io_dstmac = ioremap(PFA_IO_DSTMAC, 8);
+
+  /* PFA currently only supports one memoryblade, statically configured */
+  writeq(memblade_mac, pfa_io_dstmac);
 
   return;
 }
@@ -670,7 +675,7 @@ static ssize_t pfa_sysfs_store_tsk(struct kobject *kobj,
   return count;
 }
 
-void pfa_init(void)
+void pfa_init(uint64_t memblade_mac)
 {
   /* Create sysfs interface
    * Don't fail on errors, User won't be able to use PFA, but we don't need
