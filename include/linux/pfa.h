@@ -166,7 +166,7 @@ static inline pfa_pgid_t pfa_swp_to_pgid(swp_entry_t ent, int tsk_id)
    */
   PFA_ASSERT(swp_type(ent) == 0, "Swapping to swp device other than 0 (%d)",
       swp_type(ent));
-  off = swp_offset(ent);
+  off = swp_offset(ent) + PFA_RPN_BASE;
   PFA_ASSERT(off < (1ul << PFA_PGID_OFFSET_BITS), "Swap page offset too large (wouldn't fit in pgid)\n");
   PFA_ASSERT(tsk_id >= 0 && tsk_id < PFA_MAX_TASKS, "Invalid task id: %d\n", tsk_id);
 
@@ -178,7 +178,7 @@ static inline pfa_pgid_t pfa_swp_to_pgid(swp_entry_t ent, int tsk_id)
 /* Create a swp_entry_t from a pgid */
 static inline swp_entry_t pfa_pgid_to_swp(pfa_pgid_t pgid)
 {
-  int off = pgid & ~(~0u << PFA_PGID_OFFSET_BITS);
+  int off = (pgid & ~(~0u << PFA_PGID_OFFSET_BITS)) - PFA_RPN_BASE;
   return swp_entry(0, off);
 }
 
