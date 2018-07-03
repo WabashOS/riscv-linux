@@ -78,6 +78,7 @@ void __iomem *pfa_io_evictstat;
 void __iomem *pfa_io_newpgid;
 void __iomem *pfa_io_newvaddr;
 void __iomem *pfa_io_newstat;
+void __iomem *pfa_io_dstmac;
 
 /* Holds every frame (struct page*) that is given to the PFA in FIFO order */
 #define PFA_FRAMEQ_MAX (CONFIG_PFA_FREEQ_SIZE + CONFIG_PFA_NEWQ_SIZE)
@@ -135,8 +136,6 @@ static int kpfad(void *p);
 
 void pfa_init(uint64_t memblade_mac)
 {
-  struct page *pfa_scratch;
-
   printk("Linux Initializing PFA\n");
 
   /* Create sysfs interface
@@ -489,11 +488,6 @@ void pfa_clear_tsk(int tsk_id)
   PFA_ASSERT(tsk_id < PFA_MAX_TASKS && tsk_id >= 0, "Invalid task id: %d\n", tsk_id);
   PFA_ASSERT(pfa_tsk[tsk_id] != NULL, "No valid PFA task at tskid %d\n", tsk_id);
   pfa_trace("De-registering pfa task (tsk=%d)\n", tsk_id);
-
-#ifdef CONFIG_PFA_KPFAD
-  /* Can't hold pfa_lock because kthread_stop blocks until kpfad_tsk exits. */
-  kthread_stop(kpfad_tsk);
-#endif
 
   pfa_lock(global);
 

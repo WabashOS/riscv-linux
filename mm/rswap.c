@@ -40,6 +40,8 @@ struct rswap_page {
   void *drambuf;
 };
 
+icenic_t *nic;
+
 static struct rhashtable page_ht;
 static struct list_head page_head;
 static spinlock_t list_lock;
@@ -85,8 +87,8 @@ static inline void debug_add_cpu_usage(int cpu)
 #endif
 }
 
+
 #ifdef CONFIG_PFA_SW_RMEM
-icenic_t *nic;
 spinlock_t rmem_mut;
 uint16_t txid;
 
@@ -387,7 +389,6 @@ static void rswap_frontswap_init(unsigned type)
 #ifdef CONFIG_PFA_SW_RMEM
   spin_lock_init(&rmem_mut);
   mb_init();
-  nic = ice_init();
 
   if(!rmem_unit_test()) {
     printk("RMEM doesn't work, don't swap you fools!!!\n");
@@ -396,7 +397,11 @@ static void rswap_frontswap_init(unsigned type)
   init_rswap_pages(REMOTE_BUF_SIZE);
 #endif
 
+#ifdef CONFIG_PFA
+  nic = ice_init();
   pfa_init(nic->mac);
+#endif
+
   pfa_stat_init();
 
   pr_info("rswap_frontswap_init end\n");

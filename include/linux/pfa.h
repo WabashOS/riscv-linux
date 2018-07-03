@@ -56,13 +56,24 @@ extern struct task_struct *pfa_tsk[PFA_MAX_TASKS];
  * | 0000 | tsk_id (5 bits) | offset (23 bits) | */
 #define PFA_PGID_OFFSET_BITS 23
 #define PFA_PGID_TSK_BITS 5
-typedef uint32_t pfa_pgid_t;
+typedef uint64_t pfa_pgid_t;
 
-/* Maximum size of a PageID (in bits). Defined in pfa_spec. */
-#define PFA_PGID_BITS 28 
 /* Location of PGID in an eviction value (defined in pfa_spec) */
 #define PFA_EVICT_PGID_SHIFT 36
 
+/* size of remote page number part of pgid */
+#define PFA_PGID_RPN_BITS  28 
+/* size of SW reserved part of pgid */
+#define PFA_PGID_SW_BITS   24 
+
+/* Return the remote page number and sw reserved parts of a pageID
+ * (respectively) */
+#define pfa_pgid_rpn(PGID) (PGID & ((1 << PFA_PGID_RPN_BITS) - 1))
+#define pfa_pgid_sw(PGID) (PGID >> PFA_PGID_RPN_BITS)
+
+
+/* Remote page numbers will start from this value and go up */
+#define PFA_RPN_BASE 4
 
 /* Global PFA lock
  * Protects access to PFA (callers of sensitive PFA functions need to acquire
