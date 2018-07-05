@@ -10,39 +10,6 @@
 #include <linux/icenet_raw.h>
 #include "internal.h"
 
-/* We rate-limit our evictions since the PFA doesn't right now 
- * Call this right before sending traffic to the memory blade. */
-int64_t outstanding = 0;
-uint64_t epoc_start = 0;
-/* Max number of outstanding evictions per epoc */
-#define MAX_OUTSTANDING 12
-/* Period of time (cycles) in which we cannot evict more than MAX_OUTSTANDING */
-#define EVICT_EPOC 30000
-void pfa_limit_evict(void)
-{
-  uint64_t now, nepoc;
-  
-  if(epoc_start == 0)
-    epoc_start = pfa_stat_clock();
-
-  now = pfa_stat_clock();
-  nepoc = (now - epoc_start) / EVICT_EPOC;
-  outstanding -= nepoc;
-  epoc_start += nepoc*EVICT_EPOC;
-  if(outstanding < 0)
-    outstanding = 0;
-
-  /* Wait until we're below our limit */
-  if(outstanding >= MAX_OUTSTANDING) {
-    /* Wait for an epoch */
-    while(pfa_stat_clock() < epoc_start + EVICT_EPOC) { cpu_relax(); }
-    epoc_start += EVICT_EPOC;
-    outstanding--;
-  }
-  
-  outstanding++;
-}
-
 #ifdef CONFIG_PFA
 
 /* Phyiscal addr for MMIO to pfa (see the PFA spec for details) */
@@ -178,11 +145,12 @@ void pfa_evict(swp_entry_t swp_ent, uintptr_t page_paddr, uintptr_t vaddr,
   uint64_t start;
 
   /* Evict Page */
-  pfa_trace("Evicting page (vaddr=0x%lx) (paddr=0x%lx) (pgid=0x%x) (tsk=%d)\n",
+  pfa_trace("Evicting page (vaddr=0x%lx) (paddr=0x%lx) (pgid=0x%llx) (tsk=%d) (pid=%d)\n",
       vaddr,
       page_paddr,
-      pfa_swp_to_pgid(swp_ent, current->pfa_tsk_id),
-      tsk->pfa_tsk_id);
+      pfa_swp_to_pgid(swp_ent, tsk->pfa_tsk_id),
+      tsk->pfa_tsk_id,
+      task_tgid_vnr(tsk));
 
 #ifdef CONFIG_PFA_DEBUG
   /* I'm not sure if this is possible in Linux, but free frames may end up on
@@ -202,13 +170,12 @@ void pfa_evict(swp_entry_t swp_ent, uintptr_t page_paddr, uintptr_t vaddr,
 
   /* Form the packed eviction value defined in pfa spec */
   evict_val = page_paddr >> PAGE_SHIFT;
-  PFA_ASSERT(evict_val >> PFA_EVICT_PGID_SHIFT == 0, "paddr component of eviction string too large\n");
-  evict_val |= ((uint64_t)pfa_swp_to_pgid(swp_ent, tsk->pfa_tsk_id) << PFA_EVICT_PGID_SHIFT);
+  PFA_ASSERT(evict_val >> PFA_EVICT_RPN_SHIFT == 0, "paddr component of eviction string too large\n");
+  evict_val |= pfa_swp_to_rpn(swp_ent) << PFA_EVICT_RPN_SHIFT;
 
   start = pfa_stat_clock();
   
   pfa_lock(evict);
-  pfa_limit_evict();
   writeq(evict_val, pfa_io_evict);
   pfa_evict_poll();
  
@@ -249,6 +216,7 @@ static void pfa_new(int mmap_sem_tsk)
 	struct vm_fault vmf;
   swp_entry_t entry;
   pfa_pgid_t new_pgid;
+  int tskid;
   struct task_struct *tsk;
 
   pgd_t *pgd;
@@ -264,21 +232,22 @@ static void pfa_new(int mmap_sem_tsk)
   
   entry = pfa_pgid_to_swp(new_pgid);
   
-  tsk = pfa_get_tsk(pfa_pgid_to_tsk(new_pgid));
-  PFA_ASSERT(tsk != NULL, "Couldn't find taskID %d\n", pfa_pgid_to_tsk(new_pgid));
+  tskid = pfa_pgid_to_tsk(new_pgid);
+  tsk = pfa_get_tsk(tskid);
+  PFA_ASSERT(tsk != NULL, "Couldn't find taskID %d\n", tskid);
 
   mm = tsk->mm;
-  PFA_ASSERT(mm, "Task has no struct mm!\n");
+  PFA_ASSERT(mm, "Task %d has no struct mm!\n", tskid);
 
   if(tsk->pfa_tsk_id != mmap_sem_tsk) {
     down_read(&(tsk->mm->mmap_sem));
   }
   
   vmf.vma = find_vma(mm, vmf.address);
-  PFA_ASSERT(vmf.vma, "Bad VMA\n");
+  PFA_ASSERT(vmf.vma, "Bad VMA for tsk %d\n", tskid);
   /* The actual check in do_page_fault is more complicated than this
    * I'm assuming swap-triggered page faults always satisfy this */
-  PFA_ASSERT((vmf.vma->vm_start <= vmf.address), "Address out of bounds\n");
+  PFA_ASSERT((vmf.vma->vm_start <= vmf.address), "Address (0x%lx) out of bounds (tsk=%d)\n", vmf.address, tskid);
 
   /* XXX gfp_mask gets set in normal swap path but seems unused. */
   vmf.flags = flags;
@@ -301,10 +270,10 @@ static void pfa_new(int mmap_sem_tsk)
   vmf.orig_pte = *vmf.pte;
   PFA_ASSERT(!pte_none(vmf.orig_pte), "Invalid PTE\n");
 
-  pfa_trace("Fetching New Page: (pgid=0x%x) (vaddr=0x%lx) (tsk=%d) (pte=0x%lx)\n",
+  pfa_trace("Fetching New Page: (pgid=0x%llx) (vaddr=0x%lx) (tsk=%d) (pte=0x%lx)\n",
       new_pgid,
       vmf.address,
-      pfa_pgid_to_tsk(new_pgid),
+      tskid,
       pte_val(vmf.orig_pte));
 
   /* Put the swap entry back into the PTE so we can use the unmodified
@@ -314,7 +283,7 @@ static void pfa_new(int mmap_sem_tsk)
 	set_pte_at(mm, vmf.address, vmf.pte, vmf.orig_pte);
 
   ret = do_swap_page(&vmf);
-  PFA_ASSERT(!(ret & VM_FAULT_ERROR), "Failed to bookkeep page in do_swap_page()\n");
+  PFA_ASSERT(!(ret & VM_FAULT_ERROR), "Failed to bookkeep page in do_swap_page() (vaddr=0x%lx, tsk=%d)\n", vmf.address, tskid);
 
   if(tsk->pfa_tsk_id != mmap_sem_tsk)
     up_read(&(tsk->mm->mmap_sem));
@@ -462,7 +431,7 @@ int pfa_set_tsk(struct task_struct *tsk)
       break;
   }
   if(tsk_idx == PFA_MAX_TASKS) {
-    pfa_warn("Ran out of pfa task slots (only 32 allowed)!\n");
+    pfa_warn("Ran out of pfa task slots (only %d allowed)!\n", PFA_MAX_TASKS);
     return 0;
   }
 
@@ -495,9 +464,9 @@ void pfa_clear_tsk(int tsk_id)
   pfa_tsk[tsk_id]->pfa_tsk_id = -1;
   pfa_tsk[tsk_id] = NULL;
 
+  pfa_trace("Done deregistering %d\n", tsk_id);
   pfa_unlock(global);
 
-  /* In practice, I should also free the frames in pfa_frameq */
   return;
 }
 

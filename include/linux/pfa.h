@@ -35,42 +35,33 @@
 /* Returns the MAC address of the memory blade to use, given the current NIC's mac */
 #define pfa_dstmac(LOOPBACK_MAC) (LOOPBACK_MAC)
 
-/* We rate-limit our evictions since the PFA doesn't right now 
- * Call this right before sending traffic to the memory blade. */
-void pfa_limit_evict(void);
-
 #ifdef CONFIG_PFA
 
 /* The PFA can only work for one task at a time right now. 
  * NULL if no one has registered with the PFA. */
-#define PFA_TASK_BITS 5
-#define PFA_MAX_TASKS (1 << PFA_TASK_BITS)
+#define PFA_MAX_TASKS 64 
 extern struct task_struct *pfa_tsk[PFA_MAX_TASKS];
+#define vma_to_task(VMA) (VMA->vm_mm->owner)
 
 /* Remote PTE */
 #define PFA_PGID_SHIFT  12
 #define PFA_PROT_SHIFT  2
 
-/* pgid is the metadata we store in a PTE before making it remote. It contains
- * the swap offset (we assume swp_type=0) and the pfa_tsk_id of the owner
- * | 0000 | tsk_id (5 bits) | offset (23 bits) | */
-#define PFA_PGID_OFFSET_BITS 23
-#define PFA_PGID_TSK_BITS 5
+/* pgid is the metadata we store in a PTE before making it remote.*/
 typedef uint64_t pfa_pgid_t;
 
 /* Location of PGID in an eviction value (defined in pfa_spec) */
-#define PFA_EVICT_PGID_SHIFT 36
+#define PFA_EVICT_RPN_SHIFT 36
 
 /* size of remote page number part of pgid */
 #define PFA_PGID_RPN_BITS  28 
-/* size of SW reserved part of pgid */
+/* size of SW reserved part of pgid (stores the tskID here)*/
 #define PFA_PGID_SW_BITS   24 
 
 /* Return the remote page number and sw reserved parts of a pageID
  * (respectively) */
 #define pfa_pgid_rpn(PGID) (PGID & ((1 << PFA_PGID_RPN_BITS) - 1))
 #define pfa_pgid_sw(PGID) (PGID >> PFA_PGID_RPN_BITS)
-
 
 /* Remote page numbers will start from this value and go up */
 #define PFA_RPN_BASE 4
@@ -153,10 +144,9 @@ static inline uintptr_t pfa_vaddr_to_paddr(pte_t pte, uintptr_t vaddr)
 }
 
 /* Convert a swp entry to a pfa pageID */
-static inline pfa_pgid_t pfa_swp_to_pgid(swp_entry_t ent, int tsk_id)
+static inline pfa_pgid_t pfa_swp_to_rpn(swp_entry_t ent)
 {
-  pfa_pgid_t pgid = 0;
-  pgoff_t off;
+  pfa_pgid_t rpn = 0;
   /* This is pretty hacky. We assume 2 things:
    * 1. Linux always uses the first swp device when evicting to PFA (probably
    *    safe so long as it never fills up from non-PFA swap activity)
@@ -166,25 +156,31 @@ static inline pfa_pgid_t pfa_swp_to_pgid(swp_entry_t ent, int tsk_id)
    */
   PFA_ASSERT(swp_type(ent) == 0, "Swapping to swp device other than 0 (%d)",
       swp_type(ent));
-  off = swp_offset(ent) + PFA_RPN_BASE;
-  PFA_ASSERT(off < (1ul << PFA_PGID_OFFSET_BITS), "Swap page offset too large (wouldn't fit in pgid)\n");
-  PFA_ASSERT(tsk_id >= 0 && tsk_id < PFA_MAX_TASKS, "Invalid task id: %d\n", tsk_id);
+  rpn = swp_offset(ent) + PFA_RPN_BASE;
+  PFA_ASSERT(rpn < (1ul << PFA_PGID_RPN_BITS), "Swap page offset too large (wouldn't fit in pgid)\n");
 
-  pgid = tsk_id << PFA_PGID_OFFSET_BITS;
-  pgid |= off; 
+  return rpn;
+}
+
+static inline pfa_pgid_t pfa_swp_to_pgid(swp_entry_t ent, int tsk_id)
+{
+  pfa_pgid_t pgid = pfa_swp_to_rpn(ent);
+  
+  PFA_ASSERT(tsk_id >= 0 && tsk_id < PFA_MAX_TASKS, "Invalid task id: %d\n", tsk_id);
+  pgid |= (pfa_pgid_t)(tsk_id << PFA_PGID_RPN_BITS);
   return pgid;
 }
 
 /* Create a swp_entry_t from a pgid */
 static inline swp_entry_t pfa_pgid_to_swp(pfa_pgid_t pgid)
 {
-  int off = (pgid & ~(~0u << PFA_PGID_OFFSET_BITS)) - PFA_RPN_BASE;
+  int off = pfa_pgid_rpn(pgid) - PFA_RPN_BASE;
   return swp_entry(0, off);
 }
 
 static inline int pfa_pgid_to_tsk(pfa_pgid_t pgid)
 {
-  return pgid >> PFA_PGID_OFFSET_BITS;
+  return pfa_pgid_sw(pgid);
 }
 
 /* Create a remote pte */

@@ -1571,15 +1571,15 @@ static bool try_to_unmap_one(struct page *page, struct vm_area_struct *vma,
 
       pfa_stat_add(n_evicted, 1);
 #ifdef CONFIG_PFA
-      pfa_evict(entry, page_to_phys(page), address, current);
-      /* XXX PFA HW We pre-emptively set both dirty
-       * and accessed to avoid extra page faults (the PFA should really do this). */
+      pfa_evict(entry, page_to_phys(page), address, vma_to_task(vma));
+      /* Rocket doesn't set these in HW, it causes traps instead. By setting
+       * these pre-emptively, we avoid those traps */
       pteval = pte_mkdirty(pteval);
       pteval = pte_mkyoung(pteval);
 
       /* The pgprot matches the evicted page. */
       pteval = pfa_mk_remote_pte(entry, __pgprot(pte_val(pteval) & 0x3FF),
-          current->pfa_tsk_id);
+          vma_to_task(vma)->pfa_tsk_id);
       set_pte_at(mm, address, pvmw.pte, pteval);
 #else
       set_pte_at(mm, address, pvmw.pte, swp_pte);

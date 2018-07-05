@@ -776,14 +776,6 @@ void __noreturn do_exit(long code)
 	if (unlikely(!tsk->pid))
 		panic("Attempted to kill the idle task!");
 
-#ifdef CONFIG_PFA
-  if(is_pfa_tsk(current)) {
-    /* De-register this task from the pfa
-     * This also cleans up PFA state */
-    pfa_clear_tsk(current->pfa_tsk_id);
-  }
-#endif
-
 	/*
 	 * If do_exit is called because this processes oopsed, it's possible
 	 * that get_fs() was left as KERNEL_DS, so reset it to USER_DS before
@@ -857,6 +849,15 @@ void __noreturn do_exit(long code)
 
 	tsk->exit_code = code;
 	taskstats_exit(tsk, group_dead);
+
+#ifdef CONFIG_PFA
+  if(is_pfa_tsk(tsk)) {
+    /* De-register this task from the pfa.
+     * This assumes no paging activity for this task will occur after calling
+     * pfa_clear_tsk */
+    pfa_clear_tsk(tsk->pfa_tsk_id);
+  }
+#endif
 
 	exit_mm();
 

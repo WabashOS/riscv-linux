@@ -1317,10 +1317,8 @@ again:
 			struct page *page;
 #ifdef CONFIG_PFA
       if (unlikely(pte_fetched(ptent))) {
-        /* panic("Seeing fetched page after process shutdown.\n"); */
-        /* This isn't ideal, but I don't know why these are happening and
-         * they aren't really fatal */
-        panic("Seeing fetched page after process shutdown.\n");
+        panic("Seeing fetched page after process shutdown (vaddr=0x%lx) (pte=0x%lx) (pid=%d).\n", 
+            addr, pte_val(ptent), task_tgid_vnr(vma_to_task(vma)));
      }
 #endif
 
@@ -2925,12 +2923,16 @@ int do_swap_page(struct vm_fault *vmf)
 				__swap_count(si, entry) == 1) {
 			/* skip swapcache */
 #ifdef CONFIG_PFA
-      page = pfa_frameq_pop();
-    
-      PFA_ASSERT(page, "Nothing returned by frameq");
+      if (is_pfa_tsk(vma_to_task(vma))) {
+        page = pfa_frameq_pop();
+        PFA_ASSERT(page, "Nothing returned by frameq");
+      } else {
+        page = alloc_page_vma(GFP_HIGHUSER_MOVABLE, vma, vmf->address);
+      }
 #else
 			page = alloc_page_vma(GFP_HIGHUSER_MOVABLE, vma, vmf->address);
 #endif
+
 			if (page) {
 				__SetPageLocked(page);
 				__SetPageSwapBacked(page);
@@ -3976,7 +3978,7 @@ static int handle_pte_fault(struct vm_fault *vmf)
     /* This page hasn't been bookkeeped yet, process it before doing rest of
      * fault handling */
     pfa_lock(global);
-    if(!is_pfa_tsk(current)) {
+    if(!is_pfa_tsk(vma_to_task(vmf->vma))) {
       panic("Seeing fetched page for non-pfa task.");
     } else {
       pfa_stat_add(n_early_newq, 1);
