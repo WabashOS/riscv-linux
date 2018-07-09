@@ -71,9 +71,9 @@ typedef uint64_t pfa_pgid_t;
  * this before calling).
  * NOTE: Often held with mm->mmap_sem. To avoid deadlock, If you need mmap_sem,
  * always down it before locking pfa_mutex. */
-extern struct mutex pfa_mutex_global;
+extern struct rw_semaphore pfa_mutex_global;
 /* Only protects the evictq (and subsequent polling for completion) */
-extern struct mutex pfa_mutex_evict;
+extern struct rw_semaphore pfa_mutex_evict;
 
 /* Macros here mostly to make it easier to track locking behavior */
 // #define pfa_trace_locks(M, ...) printk("PFA_TRACE_LOCKS: " M, ##__VA_ARGS__)
@@ -81,12 +81,12 @@ extern struct mutex pfa_mutex_evict;
 
 #define pfa_lock(LOCK) do { \
   pfa_trace_locks("Locking PFA: %s:%d\n", __FILE__, __LINE__); \
-  mutex_lock(&pfa_mutex_##LOCK); \
+  down_write(&pfa_mutex_##LOCK); \
   pfa_trace_locks("Got it!\n"); \
 } while(0)
 
-static inline int __pfa_trylock(const char *file, int line, struct mutex *lock) {
-  int res = mutex_trylock(lock);
+static inline int __pfa_trylock(const char *file, int line, struct rw_semaphore *lock) {
+  int res = down_write_trylock(lock);
   if(res)
     pfa_trace_locks("Locking PFA: %s:%d\n", file, line);
   else
@@ -97,14 +97,14 @@ static inline int __pfa_trylock(const char *file, int line, struct mutex *lock) 
 #define pfa_trylock(LOCK) __pfa_trylock(__FILE__, __LINE__, &pfa_mutex_##LOCK)
 
 #define pfa_unlock(LOCK) do { \
-  mutex_unlock(&pfa_mutex_##LOCK); \
+  up_write(&pfa_mutex_##LOCK); \
   pfa_trace_locks("Unlocked PFA: %s:%d\n", __FILE__, __LINE__); \
 } while(0)
 
 /* Don't use BUG_ON(!mutex_is_locked...), it breaks in bizzare ways */
 #define pfa_assert_lock(LOCK) \
   do { \
-    if(!mutex_is_locked(&pfa_mutex_##LOCK)) \
+    if(!rwsem_is_locked(&pfa_mutex_##LOCK)) \
       panic("pfa_assert_lock"); \
   } while(0)
 

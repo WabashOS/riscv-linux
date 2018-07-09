@@ -23,8 +23,8 @@
 #define PFA_IO_NEWSTAT             (PFA_IO_BASE + 48)
 #define PFA_IO_DSTMAC              (PFA_IO_BASE + 56)
 
-DEFINE_MUTEX(pfa_mutex_global);
-DEFINE_MUTEX(pfa_mutex_evict);
+DECLARE_RWSEM(pfa_mutex_global);
+DECLARE_RWSEM(pfa_mutex_evict);
 
 /* sysfs stuff */
 ssize_t pfa_sysfs_show_tsk(struct kobject *kobj,
@@ -137,6 +137,8 @@ static void pfa_evict_poll(void)
 
 /* Evict a page to the pfa.
  * ptep - paddr of pte for the page to be evicted
+ *
+ * We hold the page lock for page_paddr
  */
 void pfa_evict(swp_entry_t swp_ent, uintptr_t page_paddr, uintptr_t vaddr,
     struct task_struct *tsk)
@@ -163,7 +165,7 @@ void pfa_evict(swp_entry_t swp_ent, uintptr_t page_paddr, uintptr_t vaddr,
    * chaos might ensue if that happens! */
   int mapcount = page_mapcount(phys_to_page(page_paddr));
   if(mapcount > 1) {
-    panic("Page (paddr=0x%lx) shared %d times (sharing not supported in pfa)\n",
+    pfa_trace("Page (paddr=0x%lx) shared %d times (sharing not supported in pfa)\n",
         page_paddr, mapcount);
   }
 #endif
@@ -175,11 +177,13 @@ void pfa_evict(swp_entry_t swp_ent, uintptr_t page_paddr, uintptr_t vaddr,
 
   start = pfa_stat_clock();
   
-  pfa_lock(evict);
+  /* I'm 99% sure we don't need to lock here because these steps are all atomic and
+   * we don't touch other global PFA datastructures. */
+  /* pfa_lock(evict); */
   writeq(evict_val, pfa_io_evict);
   pfa_evict_poll();
  
-  pfa_unlock(evict);
+  /* pfa_unlock(evict); */
 
   pfa_stat_add(t_rmem_write, pfa_stat_clock() - start);
 }

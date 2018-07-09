@@ -396,11 +396,15 @@ struct page *__read_swap_cache_async(swp_entry_t entry, gfp_t gfp_mask,
 		 * Get a new page to read into from swap.
 		 */
 #ifdef CONFIG_PFA
-    if(!new_page) {
+    if(!new_page && is_pfa_tsk(vma_to_task(vma))) {
       new_page = pfa_frameq_pop();
     
       if (!new_page)
         break;		/* Out of memory */
+    } else {
+			new_page = alloc_page_vma(gfp_mask, vma, addr);
+			if (!new_page)
+				break;		/* Out of memory */
     }
 #else
 		if (!new_page) {
