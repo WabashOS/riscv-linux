@@ -113,8 +113,7 @@ static inline int __pfa_trylock(const char *file, int line, struct rw_semaphore 
 void pfa_init(uint64_t memblade_mac);
 
 /* Evict a page to the pfa. */
-void pfa_evict(swp_entry_t swp_ent, uintptr_t page_paddr, uintptr_t vaddr,
-    struct task_struct *tsk);
+void pfa_evict(uintptr_t rpn, phys_addr_t page_paddr);
 
 int64_t pfa_nnew(void);
 

@@ -140,40 +140,24 @@ static void pfa_evict_poll(void)
  *
  * We hold the page lock for page_paddr
  */
-void pfa_evict(swp_entry_t swp_ent, uintptr_t page_paddr, uintptr_t vaddr,
-    struct task_struct *tsk)
+void pfa_evict(uintptr_t rpn, phys_addr_t page_paddr)
 {
   uint64_t evict_val;
   uint64_t start;
 
-  /* Evict Page */
-  pfa_trace("Evicting page (vaddr=0x%lx) (paddr=0x%lx) (pgid=0x%llx) (tsk=%d) (pid=%d)\n",
-      vaddr,
-      page_paddr,
-      pfa_swp_to_pgid(swp_ent, tsk->pfa_tsk_id),
-      tsk->pfa_tsk_id,
-      task_tgid_vnr(tsk));
-
+  pfa_trace("Actual eviction: (rpn=0x%lx) (paddr=0x%llx)\n", rpn, page_paddr);
 #ifdef CONFIG_PFA_DEBUG
   /* I'm not sure if this is possible in Linux, but free frames may end up on
    * the lru lists and get re-selected for eviction. */
   if(pfa_frameq_search(page_paddr)) {
-      panic("Evicting frame on frameq: (paddr=0x%lx)\n", page_paddr);
-  }
-
-  /* The PFA will get right-screwy if we evict shared pages. Who knows what
-   * chaos might ensue if that happens! */
-  int mapcount = page_mapcount(phys_to_page(page_paddr));
-  if(mapcount > 1) {
-    pfa_trace("Page (paddr=0x%lx) shared %d times (sharing not supported in pfa)\n",
-        page_paddr, mapcount);
+      panic("Evicting frame on frameq: (paddr=0x%llx)\n", page_paddr);
   }
 #endif
 
   /* Form the packed eviction value defined in pfa spec */
   evict_val = page_paddr >> PAGE_SHIFT;
   PFA_ASSERT(evict_val >> PFA_EVICT_RPN_SHIFT == 0, "paddr component of eviction string too large\n");
-  evict_val |= pfa_swp_to_rpn(swp_ent) << PFA_EVICT_RPN_SHIFT;
+  evict_val |= rpn << PFA_EVICT_RPN_SHIFT;
 
   start = pfa_stat_clock();
   

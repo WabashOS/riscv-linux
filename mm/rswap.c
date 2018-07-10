@@ -87,8 +87,6 @@ static inline void debug_add_cpu_usage(int cpu)
 #endif
 }
 
-
-#ifdef CONFIG_PFA_SW_RMEM
 spinlock_t rmem_mut;
 uint16_t txid;
 
@@ -160,7 +158,6 @@ static int rmem_unit_test(void)
       get_cycles);
   return 1;
 }
-#endif //defined CONFIG_PFA_SW_RMEM
 
 /*
  * returns a free rswap_page
@@ -237,15 +234,11 @@ static int rswap_frontswap_store(unsigned type, pgoff_t offset,
   uint64_t start;
 
 #ifdef CONFIG_PFA
-  /* for PFA, we actually store the page during try_to_unmap_one */
+  /* This is the actual write to remote memory */
+  /* pfa_evict(pfa_swp_to_rpn(swp_entry(type, offset)), page_to_phys(page)); */
   return 0;
-#elif defined CONFIG_PFA_SW_RMEM
-/* Baseline that talks to the real NW memory blade */
-  page_vaddr = kmap_atomic(page); 
-  /* printk("Starting put: pgid=%ld\n", offset); */
-  rmem_put(virt_to_phys(page_vaddr), offset);
-  kunmap_atomic(page_vaddr);
-  /* printk("Done storing: pgid=%ld\n", offset); */
+#elif defined(CONFIG_PFA_SW_RMEM)
+  rmem_put(page_to_phys(page), pfa_swp_to_rpn(swp_entry(type, offset)));
   return 0;
 #endif
   start = pfa_stat_clock();
@@ -305,13 +298,12 @@ static int rswap_frontswap_load(unsigned type, pgoff_t offset,
 
 #ifdef CONFIG_PFA
   /* When using the PFA, the page data was already fetched. Do nothing here.*/
+  /* if (page_swapcount(page) > 2 || page_mapcount(page) > 0) { */
+    pfa_trace("swapin page: (pgid=0x%lx) (paddr=0x%llx) (mapcount=%d) (swapcount=%d)\n", pfa_swp_to_rpn(swp_entry(type, offset)), page_to_phys(page), page_mapcount(page), page_swapcount(page));
+  /* } */
   return 0;
 #elif defined CONFIG_PFA_SW_RMEM
-  page_vaddr = kmap_atomic(page);
-  /* printk("Beginning loading: pgid=%ld\n", offset); */
-  rmem_get(virt_to_phys(page_vaddr), offset);
-  kunmap_atomic(page_vaddr);
-  /* printk("Done loading: pgid=%ld\n", offset); */
+  rmem_get(page_to_phys(page), offset);
   return 0;
 #else
   uint64_t start = pfa_stat_clock();
@@ -347,11 +339,9 @@ static void rswap_frontswap_invalidate_page(unsigned type, pgoff_t offset)
 {
   struct rswap_page *rpage;
 
-#ifdef CONFIG_PFA
+#if defined(CONFIG_PFA) || defined(CONFIG_PFA_SW_RMEM)
   /* Hopefully it's OK to never invalidate stuff? I'm not even sure what that
    * would really mean... */
-  return;
-#elif defined CONFIG_PFA_SW_RMEM
   return;
 #endif
 
@@ -376,9 +366,7 @@ static void rswap_frontswap_invalidate_page(unsigned type, pgoff_t offset)
 
 static void rswap_frontswap_invalidate_area(unsigned type)
 {
-#ifdef CONFIG_PFA
-  return;
-#elif defined CONFIG_PFA_SW_RMEM
+#if defined(CONFIG_PFA) || defined(CONFIG_PFA_SW_RMEM)
   return;
 #endif
   pr_err("rswap_frontswap_invalidate_area\n");
@@ -386,7 +374,7 @@ static void rswap_frontswap_invalidate_area(unsigned type)
 
 static void rswap_frontswap_init(unsigned type)
 {
-#ifdef CONFIG_PFA_SW_RMEM
+#if defined(CONFIG_PFA_SW_RMEM) || defined(CONFIG_PFA)
   spin_lock_init(&rmem_mut);
   mb_init();
 

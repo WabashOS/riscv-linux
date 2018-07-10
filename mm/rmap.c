@@ -1571,7 +1571,38 @@ static bool try_to_unmap_one(struct page *page, struct vm_area_struct *vma,
 
       pfa_stat_add(n_evicted, 1);
 #ifdef CONFIG_PFA
-      pfa_evict(entry, page_to_phys(page), address, vma_to_task(vma));
+      struct task_struct *tsk = vma_to_task(vma);
+      /* We have the most info about the eviction here, even though the
+       * actual eviction happens in rswap_frontswap_store */
+      pfa_trace("Evicting page (vaddr=0x%lx) (paddr=0x%llx) (pgid=0x%llx) (tsk=%d) (pid=%d)\n",
+      address,
+      page_to_phys(page),
+      pfa_swp_to_pgid(entry, tsk->pfa_tsk_id),
+      tsk->pfa_tsk_id,
+      task_tgid_vnr(tsk));
+
+      /* The PFA will get right-screwy if we evict shared pages. Who knows what
+       * chaos might ensue if that happens! */
+      if(unlikely(page_mapcount(page) > 1)) {
+        pfa_trace("Page (paddr=0x%llx) (pgid=0x%llx) shared %d times (sharing not supported in pfa)\n",
+        page_to_phys(page), pfa_swp_to_pgid(entry, tsk->pfa_tsk_id), page_mapcount(page));
+      }
+
+      /* Normally, a page gets written out later (in pageout()) after we're
+       * sure that all references have been cleared and no one can dirty the
+       * page again. Unfortunately, this causes a race condition where the
+       * remote PTE is set, but there is no valid remote page. Without the PFA
+       * this gets handled in the page fault handler (the faulting process
+       * goes through the swap cache), but with the PFA the page reads bogus
+       * data from remote memory. Instead, we write the page out here to ensure a valid remote page exists before anyone could fault on it.
+       *
+       * Unfortunately, This doesn't work correctly for shared pages
+       * (the same page will be evicted multiple times in that case). It also
+       * is likely wrong for multiple threads (at least on multiple cores)
+       * because one thread with a stale TLB could theoretically write to the
+       * page before the TLB is flushed (final flush happens in shrink_page_list()). */
+      pfa_evict(pfa_swp_to_rpn(entry), page_to_phys(page));
+
       /* Rocket doesn't set these in HW, it causes traps instead. By setting
        * these pre-emptively, we avoid those traps */
       pteval = pte_mkdirty(pteval);
