@@ -108,7 +108,8 @@ static inline void post_send(
 
 	packet = (len << 48) | (addr & 0xffffffffffffL);
 
-	iowrite64(packet, nic->iomem + ICENET_SEND_REQ);
+	/* iowrite64(packet, nic->iomem + ICENET_SEND_REQ); */
+	writeq(packet, nic->iomem + ICENET_SEND_REQ);
 	sk_buff_cq_push(&nic->send_cq, skb);
 
 //	printk(KERN_DEBUG "IceNet: tx addr=%lx len=%llu\n", addr, len);
@@ -123,7 +124,8 @@ static inline void post_recv(
 	skb_reserve(skb, align);
 	addr = virt_to_phys(skb->data);
 
-	iowrite64(addr, nic->iomem + ICENET_RECV_REQ);
+	/* iowrite64(addr, nic->iomem + ICENET_RECV_REQ); */
+	writeq(addr, nic->iomem + ICENET_RECV_REQ);
 	sk_buff_cq_push(&nic->recv_cq, skb);
 }
 
@@ -305,7 +307,8 @@ static int icenet_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 static void icenet_init_mac_address(struct net_device *ndev)
 {
 	struct icenet_device *nic = netdev_priv(ndev);
-	uint64_t macaddr = ioread64(nic->iomem + ICENET_MACADDR);
+	/* uint64_t macaddr = ioread64(nic->iomem + ICENET_MACADDR); */
+	uint64_t macaddr = readq(nic->iomem + ICENET_MACADDR);
 
 	ndev->addr_assign_type = NET_ADDR_PERM;
 	memcpy(ndev->dev_addr, &macaddr, MACADDR_BYTES);

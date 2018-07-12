@@ -62,6 +62,7 @@ extern struct task_struct *pfa_stat_tsk;
 /* Get CPU clock cycle (different than Linux get_cycles()) 
  * NOTE: Use this, DON'T USE get_cycles()!!!
  * Linux's get_cycles() uses rdtime which is a trap on rocketchip (i.e. slow) */
+#ifdef CONFIG_PFA
 static inline uint64_t pfa_stat_clock(void)
 {
 	uint64_t n;
@@ -71,6 +72,12 @@ static inline uint64_t pfa_stat_clock(void)
 		: "=r" (n));
 	return n;
 }
+#else
+static inline uint64_t pfa_stat_clock(void)
+{
+  return get_cycles();
+}
+#endif
 
 /* Call once at boot time. */
 void pfa_stat_init(void);

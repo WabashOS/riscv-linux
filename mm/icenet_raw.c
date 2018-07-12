@@ -1,5 +1,7 @@
 #include <linux/icenet_raw.h>
 #include <linux/slab.h>
+#include <linux/io.h>
+#include <asm/io.h>
 
 #define ICENET_NAME "icenet"
 #define ICENET_IO_BASE  0x10016000
@@ -52,7 +54,8 @@ void ice_post_send(icenic_t *nic, bool last, uintptr_t paddr, size_t len)
 	command = (len << 48) | (paddr & 0xffffffffffffL);
   command |= last ? 0 : (1ul << 63);
 
-	iowrite64(command, nic->iomem + ICENET_SEND_REQ);
+	/* iowrite64(command, nic->iomem + ICENET_SEND_REQ); */
+	writeq(command, nic->iomem + ICENET_SEND_REQ);
 }
 
 void ice_drain_sendq(icenic_t *nic)
@@ -75,7 +78,8 @@ void ice_post_recv(icenic_t *nic, uintptr_t paddr)
   if((paddr & 0x7) != 0) {
     panic("Unaligned receive buffer: %lx\n", paddr);
   }
-	iowrite64(paddr, nic->iomem + ICENET_RECV_REQ);
+	/* iowrite64(paddr, nic->iomem + ICENET_RECV_REQ); */
+	writeq(paddr, nic->iomem + ICENET_RECV_REQ);
 }
 
 size_t ice_recv_one(icenic_t *nic)
@@ -99,7 +103,8 @@ icenic_t *ice_init(void)
   nic->recvq_max = recv_req_avail(nic);
   nic->sendq_max = send_req_avail(nic);
 
-  nic->mac = ioread64(nic->iomem + ICENET_MACADDR);
+  /* nic->mac = ioread64(nic->iomem + ICENET_MACADDR); */
+  nic->mac = readq(nic->iomem + ICENET_MACADDR);
 
   return nic;
 }
