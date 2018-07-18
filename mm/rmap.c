@@ -65,6 +65,7 @@
 #include <linux/page_idle.h>
 #include <linux/memremap.h>
 #include <linux/pfa.h>
+#include <linux/pfa_stat.h>
 
 #include <asm/tlbflush.h>
 
@@ -1346,6 +1347,10 @@ static bool try_to_unmap_one(struct page *page, struct vm_area_struct *vma,
 	bool ret = true;
 	unsigned long start = address, end;
 	enum ttu_flags flags = (enum ttu_flags)arg;
+
+  /* XXX PFA
+   * Track the last evicted vaddr, used for unit tests */
+  pfa_pflat_set_vaddr(address, vma);
 
 	/* munlock has nothing to gain from examining un-locked vmas */
 	if ((flags & TTU_MUNLOCK) && !(vma->vm_flags & VM_LOCKED))

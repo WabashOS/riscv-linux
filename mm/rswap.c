@@ -13,8 +13,8 @@
 #include <linux/memblade_client.h>
 #include <linux/icenet_raw.h>
 
-/* #undef RSWAP_DEBUG */
-#define RSWAP_DEBUG
+#undef RSWAP_DEBUG
+/* #define RSWAP_DEBUG */
 
 /* Remote memory blade read/write latency to simulate (in ns) */
 #define RMEM_WRITE_LAT 0

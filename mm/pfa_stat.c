@@ -1,28 +1,52 @@
 #include <linux/pfa_stat.h>
 #include <linux/kobject.h>
+#include <linux/slab.h>
 
 pfa_stat_t pfa_stats = {0};
 struct task_struct *pfa_stat_tsk = NULL;
+uint64_t pfa_pfstart = 0;
+uintptr_t pfa_last_vaddr = 0;
 
+/* Generic stats and profiling for the PFA and swapping subsystem. Works for
+ * both the baseline and the PFA (not sure about validity for rswap-only...).
+ */
 ssize_t pfa_sysfs_show_stat(struct kobject *kobj,
     struct kobj_attribute *attr, char *buf);
 static ssize_t pfa_sysfs_store_stat(struct kobject *kobj,
     struct kobj_attribute *attr, const char *buf, size_t count);
 
+/* This prints a csv header row for the PFA stats, this makes it easy to dump
+ * csvs (call this once and then read from pfa_stat a bunch of times for
+ * different experiments */
 ssize_t pfa_sysfs_show_statlbl(struct kobject *kobj,
     struct kobj_attribute *attr, char *buf);
 static ssize_t pfa_sysfs_store_statlbl(struct kobject *kobj,
     struct kobj_attribute *attr, const char *buf, size_t count);
 
+/* This supports the page-fault latency experiment which requires a special
+ * user-space program to cooperate. */
+ssize_t pfa_sysfs_show_pflat(struct kobject *kobj,
+    struct kobj_attribute *attr, char *buf);
+static ssize_t pfa_sysfs_store_pflat(struct kobject *kobj,
+    struct kobj_attribute *attr, const char *buf, size_t count);
+
 struct kobj_attribute pfa_sysfs_stat = __ATTR(pfa_stat, 0660, pfa_sysfs_show_stat, pfa_sysfs_store_stat);
 struct kobj_attribute pfa_sysfs_statlbl = __ATTR(pfa_stat_label, 0660, pfa_sysfs_show_statlbl, pfa_sysfs_store_statlbl);
+struct kobj_attribute pfa_sysfs_pflat = __ATTR(pfa_pflat, 0660, pfa_sysfs_show_pflat, pfa_sysfs_store_pflat);
 
 void pfa_stat_init(void)
 {
+  printk("loading pfa_stat\n");
   if(sysfs_create_file(mm_kobj, &pfa_sysfs_stat.attr) != 0)
     pr_err("Failed to create sysfs entries for pfa statistics\n");
   if(sysfs_create_file(mm_kobj, &pfa_sysfs_statlbl.attr) != 0)
     pr_err("Failed to create sysfs entries for pfa statistics\n");
+
+#ifdef CONFIG_PFA_PFLAT  
+  if(sysfs_create_file(mm_kobj, &pfa_sysfs_pflat.attr) != 0)
+    pr_err("Failed to create sysfs entries for pfa \"page-fault latency\" experiment\n");
+#endif
+
 }
 
 static const pfa_stat_t __pfa_stat_empty = {0};
@@ -105,4 +129,34 @@ static ssize_t pfa_sysfs_store_statlbl(struct kobject *kobj,
     struct kobj_attribute *attr, const char *buf, size_t count)
 {
   return 0;
+}
+
+int pfa_pflat_state = 0;
+ssize_t pfa_sysfs_show_pflat(struct kobject *kobj,
+    struct kobj_attribute *attr, char *buf)
+{
+  if(pfa_pflat_state == 0) {
+    printk("Reporting vaddr (0x%lx) and switching to state 1\n", pfa_last_vaddr);
+    pfa_pflat_state = 1;
+    return sprintf(buf, "0x%lx", pfa_last_vaddr);
+  } else if(pfa_pflat_state == 1) {
+    printk("Reporting pfstart time and switching to state 0\n");
+    pfa_pflat_state = 0;
+    pfa_stat_tsk = NULL;
+    return sprintf(buf, "%llu", pfa_pfstart);
+  } else {
+    printk("pflat: invalid state %d\n", pfa_pflat_state);
+    return 0;
+  }
+}
+
+static ssize_t pfa_sysfs_store_pflat(struct kobject *kobj,
+    struct kobj_attribute *attr, const char *buf, size_t count)
+{
+  pfa_pflat_state = 0;
+  pfa_pfstart = 0;
+  pfa_last_vaddr = 0;
+  pfa_stat_tsk = current;
+  printk("Setting %d as pfa_stat task\n", task_tgid_vnr(current));
+  return count;
 }

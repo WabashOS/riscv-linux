@@ -28,6 +28,7 @@
 #define CREATE_TRACE_POINTS
 #include <asm/trace/exceptions.h>
 
+#include <linux/pfa_stat.h>
 /*
  * Returns 0 if mmiotrace is disabled, or if the fault is not
  * handled by mmiotrace:
@@ -1250,6 +1251,10 @@ __do_page_fault(struct pt_regs *regs, unsigned long error_code,
 
 	tsk = current;
 	mm = tsk->mm;
+
+  /* XXX PFA 
+   * Used by page fault latency test */
+  pfa_pflat_set_start(address);
 
 	/*
 	 * Detect and handle instructions that would cause a page fault for

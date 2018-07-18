@@ -2,6 +2,7 @@
 #define _PFA_STAT_H
 #include <linux/types.h>
 #include <linux/sched.h>
+#include <linux/mm_types.h>
 
 /* Statistics
  * All times are measured in terms of CPU clock cycles as reported by
@@ -49,19 +50,20 @@ typedef struct pfa_stat {
 
 } pfa_stat_t;
 
-/* Add "value" to "feild" of global pfa_stat_t for task "tsk" 
- * NOTE: Right now this just filters by tsk, eventually we might
- * have per-task statistics. */
+/* Add or set "value" to "feild" of global pfa_stat_t for task "tsk" */
 #define pfa_stat_add(feild, value) atomic64_add(value, &(pfa_stats.feild)); 
+#define pfa_stat_set(feild, value) atomic64_set(&(pfa_stats.feild), value); 
 
 /* Global stats struct (use atomic_* to access feilds) */
 extern pfa_stat_t pfa_stats;
 
 extern struct task_struct *pfa_stat_tsk;
+extern uint64_t pfa_pfstart;
+extern uintptr_t pfa_last_vaddr;
 
 /* Get CPU clock cycle (different than Linux get_cycles()) 
  * NOTE: Use this, DON'T USE get_cycles()!!!
- * Linux's get_cycles() uses rdtime which is a trap on rocketchip (i.e. slow) */
+ * Linux's get_cycles() uses rdtime which is a trap on rocket (i.e. slow) */
 #ifdef CONFIG_PFA
 static inline uint64_t pfa_stat_clock(void)
 {
@@ -75,6 +77,7 @@ static inline uint64_t pfa_stat_clock(void)
 #else
 static inline uint64_t pfa_stat_clock(void)
 {
+  /* This is rdtsc on x86 */
   return get_cycles();
 }
 #endif
@@ -88,4 +91,32 @@ void pfa_stat_init(void);
  */
 void pfa_stat_reset(struct task_struct *tsk);
 
+extern int pfa_pflat_state;
+
+#ifdef CONFIG_PFA_PFLAT
+static inline void pfa_pflat_set_vaddr(uintptr_t vaddr, struct vm_area_struct *vma)
+{
+  if(pfa_pflat_state == 0 && vma->vm_mm->owner == pfa_stat_tsk) {
+    printk("setting last evicted vaddr to %lx\n", vaddr);
+    pfa_last_vaddr = vaddr;
+  }
+}
+
+static inline void pfa_pflat_set_start(uintptr_t vaddr)
+{
+  if(pfa_pflat_state == 1 &&
+     current == pfa_stat_tsk &&
+     pfa_pfstart == 0 &&
+     vaddr == pfa_last_vaddr) {
+    pfa_pfstart = pfa_stat_clock();
+    printk("pf for pflat experiment started at: %lld\n", pfa_pfstart);
+  }
+}
+#else
+
+#define pfa_pflat_set_vaddr(vaddr, vma)
+#define pfa_pflat_set_start(vaddr)
 #endif
+
+#endif
+

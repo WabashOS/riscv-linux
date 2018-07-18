@@ -525,6 +525,14 @@ config PFA_DEBUG
     Enables more extensive (and potentially performance-impacting) debugging and
     sanity checking.
 
+config PFA_PFLAT
+  bool "Enable pagefault latency test"
+  default n
+  help
+    Enables the pagefault latency unit test. This adds extra instrumentation to
+    the page fault handler and page eviction paths and adds the
+    /sys/kernel/mm/pfa_pflat sysfs file. Disable unless you really need it.
+
 config PFA_KPFAD
   bool "Enable the pfa daemon"
   default n

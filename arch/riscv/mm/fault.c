@@ -53,6 +53,7 @@ asmlinkage void do_page_fault(struct pt_regs *regs)
 	tsk = current;
 	mm = tsk->mm;
 
+  pfa_pflat_set_start(addr);
   if(is_pfa_tsk(current)) {
     pfa_stat_add(n_fault, 1);
   }
