@@ -423,7 +423,12 @@ static int __init rswap_init_debugfs(void)
 
 static int __init init_rswap(void)
 {
+  // XXX This is the wrong way to do this, in later versions Emmanuel turned
+  // this into a kernel module, which I think is the right way.
+  // Fixes compilation issue if frontswap isn't enabled
+#ifdef CONFIG_FRONTSWAP
   frontswap_register_ops(&rswap_frontswap_ops);
+#endif
   if (rswap_init_debugfs())
     pr_err("rswap debugfs failed\n");
 

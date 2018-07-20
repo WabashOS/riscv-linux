@@ -163,11 +163,8 @@ void pfa_evict(uintptr_t rpn, phys_addr_t page_paddr)
   
   /* I'm 99% sure we don't need to lock here because these steps are all atomic and
    * we don't touch other global PFA datastructures. */
-  /* pfa_lock(evict); */
   writeq(evict_val, pfa_io_evict);
   pfa_evict_poll();
- 
-  /* pfa_unlock(evict); */
 
   pfa_stat_add(t_rmem_write, pfa_stat_clock() - start);
 }
