@@ -30,9 +30,9 @@ ssize_t pfa_sysfs_show_pflat(struct kobject *kobj,
 static ssize_t pfa_sysfs_store_pflat(struct kobject *kobj,
     struct kobj_attribute *attr, const char *buf, size_t count);
 
-struct kobj_attribute pfa_sysfs_stat = __ATTR(pfa_stat, 0660, pfa_sysfs_show_stat, pfa_sysfs_store_stat);
-struct kobj_attribute pfa_sysfs_statlbl = __ATTR(pfa_stat_label, 0660, pfa_sysfs_show_statlbl, pfa_sysfs_store_statlbl);
-struct kobj_attribute pfa_sysfs_pflat = __ATTR(pfa_pflat, 0660, pfa_sysfs_show_pflat, pfa_sysfs_store_pflat);
+struct kobj_attribute pfa_sysfs_stat = __ATTR(pfa_stat, 0770, pfa_sysfs_show_stat, pfa_sysfs_store_stat);
+struct kobj_attribute pfa_sysfs_statlbl = __ATTR(pfa_stat_label, 0770, pfa_sysfs_show_statlbl, pfa_sysfs_store_statlbl);
+struct kobj_attribute pfa_sysfs_pflat = __ATTR(pfa_pflat, 0770, pfa_sysfs_show_pflat, pfa_sysfs_store_pflat);
 
 void pfa_stat_init(void)
 {
@@ -67,7 +67,7 @@ ssize_t pfa_sysfs_show_stat(struct kobject *kobj,
    * OK, you may continue.
    */
   return sprintf(buf,
-      "%ld,"
+      "%ld"
       "%ld,"
       "%ld,"
       "%ld,"
@@ -136,11 +136,9 @@ ssize_t pfa_sysfs_show_pflat(struct kobject *kobj,
     struct kobj_attribute *attr, char *buf)
 {
   if(pfa_pflat_state == 0) {
-    printk("Reporting vaddr (0x%lx) and switching to state 1\n", pfa_last_vaddr);
     pfa_pflat_state = 1;
     return sprintf(buf, "0x%lx", pfa_last_vaddr);
   } else if(pfa_pflat_state == 1) {
-    printk("Reporting pfstart time and switching to state 0\n");
     pfa_pflat_state = 0;
     pfa_stat_tsk = NULL;
     return sprintf(buf, "%llu", pfa_pfstart);
@@ -157,6 +155,5 @@ static ssize_t pfa_sysfs_store_pflat(struct kobject *kobj,
   pfa_pfstart = 0;
   pfa_last_vaddr = 0;
   pfa_stat_tsk = current;
-  printk("Setting %d as pfa_stat task\n", task_tgid_vnr(current));
   return count;
 }

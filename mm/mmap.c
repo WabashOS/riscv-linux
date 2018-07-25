@@ -2646,7 +2646,7 @@ int do_munmap(struct mm_struct *mm, unsigned long start, size_t len,
     pfa_lock(global);
     pfa_drain_newq(current->pfa_tsk_id);
     pfa_unlock(global);
-    pfa_stat_add(n_early_newq, 1)
+    pfa_stat_add(n_early_newq, 1, current)
   }
 #endif
 

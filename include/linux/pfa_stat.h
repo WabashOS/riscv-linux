@@ -17,7 +17,7 @@ typedef struct pfa_stat {
 
   /* Cycles waiting for reads from the backing store (rswap_load).
    *
-   * NOTE: this will always be 0 when using the PFA */
+   * NOTE: this will always be 0 when using the PFA (can't be measured in SW)*/
   atomic64_t t_rmem_read;
 
   /* Total number of page faults (swapping or otherwise) */
@@ -40,19 +40,17 @@ typedef struct pfa_stat {
   /* The total number of pages evicted */
   atomic64_t n_evicted;
 
-  /* The total number of pages fetched */
+  /* The total number of pages fetched (should be the same as "major
+   * pagefaults" when the PFA is disabled. */
   atomic64_t n_fetched;
 
   /* Time spent in kpfad (doesn't include overhead due to context switch) */
   atomic64_t t_kpfad;
+
   /* Number of invocations of kpfad (regardless of runtime or lock contention) */
   atomic64_t n_kpfad;
 
 } pfa_stat_t;
-
-/* Add or set "value" to "feild" of global pfa_stat_t for task "tsk" */
-#define pfa_stat_add(feild, value) atomic64_add(value, &(pfa_stats.feild)); 
-#define pfa_stat_set(feild, value) atomic64_set(&(pfa_stats.feild), value); 
 
 /* Global stats struct (use atomic_* to access feilds) */
 extern pfa_stat_t pfa_stats;
@@ -61,10 +59,30 @@ extern struct task_struct *pfa_stat_tsk;
 extern uint64_t pfa_pfstart;
 extern uintptr_t pfa_last_vaddr;
 
+/* Add or set "value" to "feild" of global pfa_stat_t for task "tsk". Record
+ * for alltasks if tsk==NULL.
+ *
+ * Use the pfa_stat_add/set version, not the _ version */
+static inline void _pfa_stat_add(atomic64_t *feild, int64_t value, struct task_struct *tsk)
+{
+  if(tsk == pfa_stat_tsk || tsk == NULL) {
+    atomic64_add(value, feild);
+  }
+}
+
+static inline void _pfa_stat_set(atomic64_t *feild, int64_t value, struct task_struct *tsk)
+{
+  if(tsk == pfa_stat_tsk || tsk == NULL) {
+    atomic64_set(feild, value);
+  }
+}
+#define pfa_stat_add(feild, value, tsk) _pfa_stat_add(&(pfa_stats.feild), value, tsk) 
+#define pfa_stat_set(feild, value, tsk) atomic64_set(&(pfa_stats.feild), value); 
+
 /* Get CPU clock cycle (different than Linux get_cycles()) 
  * NOTE: Use this, DON'T USE get_cycles()!!!
  * Linux's get_cycles() uses rdtime which is a trap on rocket (i.e. slow) */
-#ifdef CONFIG_PFA
+#ifdef CONFIG_RISCV
 static inline uint64_t pfa_stat_clock(void)
 {
 	uint64_t n;
@@ -97,7 +115,6 @@ extern int pfa_pflat_state;
 static inline void pfa_pflat_set_vaddr(uintptr_t vaddr, struct vm_area_struct *vma)
 {
   if(pfa_pflat_state == 0 && vma->vm_mm->owner == pfa_stat_tsk) {
-    printk("setting last evicted vaddr to %lx\n", vaddr);
     pfa_last_vaddr = vaddr;
   }
 }
@@ -109,7 +126,6 @@ static inline void pfa_pflat_set_start(uintptr_t vaddr)
      pfa_pfstart == 0 &&
      vaddr == pfa_last_vaddr) {
     pfa_pfstart = pfa_stat_clock();
-    printk("pf for pflat experiment started at: %lld\n", pfa_pfstart);
   }
 }
 #else

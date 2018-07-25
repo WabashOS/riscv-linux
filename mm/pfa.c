@@ -165,8 +165,6 @@ void pfa_evict(uintptr_t rpn, phys_addr_t page_paddr)
    * we don't touch other global PFA datastructures. */
   writeq(evict_val, pfa_io_evict);
   pfa_evict_poll();
-
-  pfa_stat_add(t_rmem_write, pfa_stat_clock() - start);
 }
 
 /* Add the frame at pfn to the list of free frames for the pfa.
@@ -207,6 +205,8 @@ static void pfa_new(int mmap_sem_tsk)
   pgd_t *pgd;
   p4d_t *p4d;
 
+  uint64_t cycles = pfa_stat_clock();
+
 #ifdef CONFIG_PFA_DEBUG
   PFA_ASSERT(readq(pfa_io_newstat) != 0, "Trying to pop empty newq\n");
 #endif
@@ -220,7 +220,8 @@ static void pfa_new(int mmap_sem_tsk)
   tskid = pfa_pgid_to_tsk(new_pgid);
   tsk = pfa_get_tsk(tskid);
   PFA_ASSERT(tsk != NULL, "Couldn't find taskID %d\n", tskid);
-
+  pfa_stat_add(n_fetched, 1, tsk);
+  
   mm = tsk->mm;
   PFA_ASSERT(mm, "Task %d has no struct mm!\n", tskid);
 
@@ -273,18 +274,18 @@ static void pfa_new(int mmap_sem_tsk)
   if(tsk->pfa_tsk_id != mmap_sem_tsk)
     up_read(&(tsk->mm->mmap_sem));
 
+  pfa_stat_add(t_bookkeeping, pfa_stat_clock() - cycles, tsk);
+
   return;
 }
 
 void pfa_drain_newq(int mmap_sem_tsk)
 {
   uint64_t nnew;
-  uint64_t cycles = pfa_stat_clock();
 
   pfa_assert_lock(global);
 
   nnew = readq(pfa_io_newstat);
-  pfa_stat_add(n_fetched, nnew);
   if(nnew) 
     pfa_trace("Draining %lld items from newq\n", nnew);
 
@@ -294,7 +295,6 @@ void pfa_drain_newq(int mmap_sem_tsk)
     nnew--;
   }
 
-  pfa_stat_add(t_bookkeeping, pfa_stat_clock() - cycles);
 }
 
 void pfa_fill_freeq(void)
@@ -329,7 +329,7 @@ int pfa_handle_fault(struct vm_fault *vmf)
   pfa_trace("Page fault received on remote page (vaddr=0x%lx) (tsk=%d)\n",
       vmf->address & PAGE_MASK,
       current->pfa_tsk_id);
-  pfa_stat_add(n_pfa_fault, 1);
+  pfa_stat_add(n_pfa_fault, 1, current);
 
   /* Note: we must already hold mm->mmap_sem or we could deadlock with kpfad */
   pfa_lock(global);
@@ -464,7 +464,7 @@ static int kpfad(void *p)
 
   while(1) {
     uint64_t start = pfa_stat_clock();
-    pfa_stat_add(n_kpfad, 1);
+    pfa_stat_add(n_kpfad, 1, NULL);
     pfa_trace("kpfad running\n");
 
     if (kthread_should_stop())
@@ -482,7 +482,7 @@ static int kpfad(void *p)
       pfa_unlock(global);
     }
 
-    pfa_stat_add(t_kpfad, pfa_stat_clock() - start);
+    pfa_stat_add(t_kpfad, pfa_stat_clock() - start, NULL);
 
     usleep_range(kpfad_sleeptime, kpfad_sleeptime + KPFAD_SLEEP_SLACK);
   }

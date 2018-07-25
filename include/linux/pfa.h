@@ -35,13 +35,14 @@
 /* Returns the MAC address of the memory blade to use, given the current NIC's mac */
 #define pfa_dstmac(LOOPBACK_MAC) (LOOPBACK_MAC)
 
+#define vma_to_task(VMA) (VMA->vm_mm->owner)
+
 #ifdef CONFIG_PFA
 
 /* The PFA can only work for one task at a time right now. 
  * NULL if no one has registered with the PFA. */
 #define PFA_MAX_TASKS 64 
 extern struct task_struct *pfa_tsk[PFA_MAX_TASKS];
-#define vma_to_task(VMA) (VMA->vm_mm->owner)
 
 /* Remote PTE */
 #define PFA_PGID_SHIFT  12

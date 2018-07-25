@@ -245,7 +245,6 @@ static int rswap_frontswap_store(unsigned type, pgoff_t offset,
 
   /* In non-pfa mode, we introduce a configurable delay to simulate NW access */
   ndelay(RMEM_WRITE_LAT);
-  pfa_stat_add(t_rmem_write, pfa_stat_clock() - start);
 
   created_rpage = false;
   rpage = rhashtable_lookup_fast(&page_ht, &offset, htparams);
@@ -280,6 +279,9 @@ static int rswap_frontswap_store(unsigned type, pgoff_t offset,
     atomic_inc(&debug_curr_rpages);
   }
   debug_stored_rpages++;
+  // XXX PFA we can't really tell which task this page was originally for, so
+  // we count them all, this only works when exactly one task is paging
+  pfa_stat_add(t_rmem_write, pfa_stat_clock() - start, NULL);
   return 0;
 }
 
@@ -298,20 +300,15 @@ static int rswap_frontswap_load(unsigned type, pgoff_t offset,
 
 #ifdef CONFIG_PFA
   /* When using the PFA, the page data was already fetched. Do nothing here.*/
-  /* if (page_swapcount(page) > 2 || page_mapcount(page) > 0) { */
-    pfa_trace("swapin page: (pgid=0x%lx) (paddr=0x%llx) (mapcount=%d) (swapcount=%d)\n", pfa_swp_to_rpn(swp_entry(type, offset)), page_to_phys(page), page_mapcount(page), page_swapcount(page));
-  /* } */
   return 0;
 #elif defined CONFIG_PFA_SW_RMEM
   rmem_get(page_to_phys(page), offset);
   return 0;
-#else
+#endif
   uint64_t start = pfa_stat_clock();
+
   /* Simulate a NW delay in non-PFA mode */
   ndelay(RMEM_READ_LAT);
-  pfa_stat_add(t_rmem_read, pfa_stat_clock() - start);
-  pfa_stat_add(n_fetched, 1);
-#endif
 
   /* find page */
   rpage = rhashtable_lookup_fast(&page_ht, &offset, htparams);
@@ -331,6 +328,9 @@ static int rswap_frontswap_load(unsigned type, pgoff_t offset,
   put_cpu();
 
   debug_loaded_rpages++;
+  
+  pfa_stat_add(n_fetched, 1, NULL);
+  pfa_stat_add(t_rmem_read, pfa_stat_clock() - start, NULL);
 
   return 0;
 }
