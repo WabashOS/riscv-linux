@@ -30,9 +30,9 @@ ssize_t pfa_sysfs_show_pflat(struct kobject *kobj,
 static ssize_t pfa_sysfs_store_pflat(struct kobject *kobj,
     struct kobj_attribute *attr, const char *buf, size_t count);
 
-struct kobj_attribute pfa_sysfs_stat = __ATTR(pfa_stat, 0770, pfa_sysfs_show_stat, pfa_sysfs_store_stat);
-struct kobj_attribute pfa_sysfs_statlbl = __ATTR(pfa_stat_label, 0770, pfa_sysfs_show_statlbl, pfa_sysfs_store_statlbl);
-struct kobj_attribute pfa_sysfs_pflat = __ATTR(pfa_pflat, 0770, pfa_sysfs_show_pflat, pfa_sysfs_store_pflat);
+struct kobj_attribute pfa_sysfs_stat = __ATTR(pfa_stat, 0660, pfa_sysfs_show_stat, pfa_sysfs_store_stat);
+struct kobj_attribute pfa_sysfs_statlbl = __ATTR(pfa_stat_label, 0660, pfa_sysfs_show_statlbl, pfa_sysfs_store_statlbl);
+struct kobj_attribute pfa_sysfs_pflat = __ATTR(pfa_pflat, 0660, pfa_sysfs_show_pflat, pfa_sysfs_store_pflat);
 
 void pfa_stat_init(void)
 {
@@ -54,6 +54,7 @@ void pfa_stat_reset(struct task_struct *tsk)
 {
   pfa_stats = __pfa_stat_empty;
   pfa_stat_tsk = tsk;
+  pfa_stat_set(t_start, pfa_stat_clock(), tsk);
 }
 
 ssize_t pfa_sysfs_show_stat(struct kobject *kobj,
@@ -67,7 +68,8 @@ ssize_t pfa_sysfs_show_stat(struct kobject *kobj,
    * OK, you may continue.
    */
   return sprintf(buf,
-      "%ld"
+      "%ld,"
+      "%ld,"
       "%ld,"
       "%ld,"
       "%ld,"
@@ -79,6 +81,7 @@ ssize_t pfa_sysfs_show_stat(struct kobject *kobj,
       "%ld,"
       "%ld,"
       "%ld\n",
+      atomic64_read(&pfa_stats.t_run),
       atomic64_read(&pfa_stats.t_bookkeeping),
       atomic64_read(&pfa_stats.t_rmem_write),
       atomic64_read(&pfa_stats.t_rmem_read),
@@ -111,6 +114,7 @@ ssize_t pfa_sysfs_show_statlbl(struct kobject *kobj,
     struct kobj_attribute *attr, char *buf)
 {
   return sprintf(buf,
+      "t_run,"
       "t_bookkeeping,"
       "t_rmem_write,"
       "t_rmem_read,"

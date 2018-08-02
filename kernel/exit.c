@@ -850,6 +850,9 @@ void __noreturn do_exit(long code)
 	tsk->exit_code = code;
 	taskstats_exit(tsk, group_dead);
 
+  pfa_stat_set(t_run,
+      pfa_stat_clock() - atomic64_read(&(pfa_stats.t_start)),
+      tsk);
 #ifdef CONFIG_PFA
   if(is_pfa_tsk(tsk)) {
     /* De-register this task from the pfa.

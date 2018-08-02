@@ -482,4 +482,8 @@ config BLK_DEV_RV_GENERIC
         depends on BLOCK
         default y
 
+config BLK_DEV_SBI_DISK
+    tristate "SBI disk support"
+    default y
+
 endif # BLK_DEV

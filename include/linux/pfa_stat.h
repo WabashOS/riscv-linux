@@ -50,6 +50,12 @@ typedef struct pfa_stat {
   /* Number of invocations of kpfad (regardless of runtime or lock contention) */
   atomic64_t n_kpfad;
 
+  /* Time that stat recording started for the most recent task. */
+  atomic64_t t_start;
+
+  /* Total runtime of the last registered task */
+  atomic64_t t_run;
+
 } pfa_stat_t;
 
 /* Global stats struct (use atomic_* to access feilds) */

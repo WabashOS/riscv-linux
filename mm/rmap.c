@@ -1574,7 +1574,18 @@ static bool try_to_unmap_one(struct page *page, struct vm_area_struct *vma,
 			if (pte_soft_dirty(pteval))
 				swp_pte = pte_swp_mksoft_dirty(swp_pte);
 
-      pfa_stat_add(n_evicted, 1, vma_to_task(vma));
+      if(vma_to_task(vma) == pfa_stat_tsk || is_pfa_tsk(vma_to_task(vma))) {
+        pfa_stat_add(n_evicted, 1, vma_to_task(vma));
+
+        /* The PFA will get right-screwy if we evict shared pages. Who knows what
+         * chaos might ensue if that happens! */
+        /* Note: we check this here to ensure that code that works on the baseline will also work with the pfa */
+        if(unlikely(page_mapcount(page) > 1)) {
+          pfa_trace("Page (paddr=0x%llx) (pgid=0x%llx) shared %d times (sharing not supported in pfa)\n",
+          page_to_phys(page), pfa_swp_to_pgid(entry, tsk->pfa_tsk_id), page_mapcount(page));
+        }
+      }
+
 #ifdef CONFIG_PFA
       struct task_struct *tsk = vma_to_task(vma);
       uint64_t start;
@@ -1586,13 +1597,6 @@ static bool try_to_unmap_one(struct page *page, struct vm_area_struct *vma,
       pfa_swp_to_pgid(entry, tsk->pfa_tsk_id),
       tsk->pfa_tsk_id,
       task_tgid_vnr(tsk));
-
-      /* The PFA will get right-screwy if we evict shared pages. Who knows what
-       * chaos might ensue if that happens! */
-      if(unlikely(page_mapcount(page) > 1)) {
-        pfa_trace("Page (paddr=0x%llx) (pgid=0x%llx) shared %d times (sharing not supported in pfa)\n",
-        page_to_phys(page), pfa_swp_to_pgid(entry, tsk->pfa_tsk_id), page_mapcount(page));
-      }
 
       /* Normally, a page gets written out later (in pageout()) after we're
        * sure that all references have been cleared and no one can dirty the
