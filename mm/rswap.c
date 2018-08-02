@@ -22,7 +22,8 @@
 /* #define RMEM_READ_LAT  31054 */
 
 /* Optimistic NW (baremetal speeds) */
-#define RMEM_READ_LAT 8243 
+#define RMEM_READ_LAT 0 
+/* #define RMEM_READ_LAT 8243  */
 
 #define ONEGB (1024UL*1024*1024)
 #define REMOTE_BUF_SIZE (ONEGB * 1) /* must match what server is allocating */
