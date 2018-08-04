@@ -37,7 +37,7 @@
 
 #define vma_to_task(VMA) (VMA->vm_mm->owner)
 
-#ifdef CONFIG_PFA
+#if defined(CONFIG_PFA) || defined(CONFIG_PFA_SW_RMEM)
 
 /* The PFA can only work for one task at a time right now. 
  * NULL if no one has registered with the PFA. */
