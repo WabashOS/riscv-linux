@@ -131,7 +131,8 @@ static int rmem_unit_test(void)
 {
   int i;
   uint64_t put_start, get_start, put_cycles, get_cycles;
-  uint64_t *pg = kmalloc(4096, GFP_KERNEL);
+  /* uint64_t *pg = kmalloc(4096, GFP_KERNEL); */
+  uint64_t *pg = __get_free_page(GFP_KERNEL);
   for(i = 0; i < (4096 / 8); i++) {
     pg[i] = 0xDEADBEEFCAFEBABE;
   }
@@ -155,6 +156,7 @@ static int rmem_unit_test(void)
     }
   }
  
+  free_page(pg);
   printk("RMEM Put: %lld cycles\nRMEM Get: %lld cycles\n", put_cycles,
       get_cycles);
   return 1;
@@ -375,6 +377,7 @@ static void rswap_frontswap_invalidate_area(unsigned type)
 
 static void rswap_frontswap_init(unsigned type)
 {
+  int i = 0;
 #if defined(CONFIG_PFA_SW_RMEM) || defined(CONFIG_PFA)
   spin_lock_init(&rmem_mut);
   mb_init();
@@ -382,6 +385,10 @@ static void rswap_frontswap_init(unsigned type)
   printk("Running memory blade unit test\n");
   if(!rmem_unit_test()) {
     printk("RMEM doesn't work, don't swap you fools!!!\n");
+  }
+  /* Run a total of 10 times to get a good measure of rmem-fetch latency */
+  for(i=0; i < 9; i++) {
+    rmem_unit_test();
   }
 #else
   init_rswap_pages(REMOTE_BUF_SIZE);
