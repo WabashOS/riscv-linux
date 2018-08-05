@@ -379,6 +379,7 @@ static void rswap_frontswap_init(unsigned type)
   spin_lock_init(&rmem_mut);
   mb_init();
 
+  printk("Running memory blade unit test\n");
   if(!rmem_unit_test()) {
     printk("RMEM doesn't work, don't swap you fools!!!\n");
   }
