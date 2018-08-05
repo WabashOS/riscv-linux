@@ -37,8 +37,6 @@
 
 #define vma_to_task(VMA) (VMA->vm_mm->owner)
 
-#if defined(CONFIG_PFA) || defined(CONFIG_PFA_SW_RMEM)
-
 /* The PFA can only work for one task at a time right now. 
  * NULL if no one has registered with the PFA. */
 #define PFA_MAX_TASKS 64 
@@ -66,6 +64,49 @@ typedef uint64_t pfa_pgid_t;
 
 /* Remote page numbers will start from this value and go up */
 #define PFA_RPN_BASE 4
+
+/* Convert a swp entry to a pfa pageID */
+static inline pfa_pgid_t pfa_swp_to_rpn(swp_entry_t ent)
+{
+  pfa_pgid_t rpn = 0;
+  /* This is pretty hacky. We assume 2 things:
+   * 1. Linux always uses the first swp device when evicting to PFA (probably
+   *    safe so long as it never fills up from non-PFA swap activity)
+   * 2. Linux swap offset only uses page_id bits (52). Probably safe since the
+   *    offset seems to be a monotonically increasing set of blockIDs (would need
+   *    to swap out PBs of data to overflow
+   */
+  PFA_ASSERT(swp_type(ent) == 0, "Swapping to swp device other than 0 (%d)",
+      swp_type(ent));
+  rpn = swp_offset(ent) + PFA_RPN_BASE;
+  PFA_ASSERT(rpn < (1ul << PFA_PGID_RPN_BITS), "Swap page offset too large (wouldn't fit in pgid)\n");
+
+  return rpn;
+}
+
+static inline pfa_pgid_t pfa_swp_to_pgid(swp_entry_t ent, int tsk_id)
+{
+  pfa_pgid_t pgid = pfa_swp_to_rpn(ent);
+  
+  PFA_ASSERT(tsk_id >= 0 && tsk_id < PFA_MAX_TASKS, "Invalid task id: %d\n", tsk_id);
+  pgid |= (pfa_pgid_t)(tsk_id << PFA_PGID_RPN_BITS);
+  return pgid;
+}
+
+/* Create a swp_entry_t from a pgid */
+static inline swp_entry_t pfa_pgid_to_swp(pfa_pgid_t pgid)
+{
+  int off = pfa_pgid_rpn(pgid) - PFA_RPN_BASE;
+  return swp_entry(0, off);
+}
+
+static inline int pfa_pgid_to_tsk(pfa_pgid_t pgid)
+{
+  return pfa_pgid_sw(pgid);
+}
+
+#if defined(CONFIG_PFA) || defined(CONFIG_PFA_SW_RMEM)
+// #if defined(CONFIG_PFA)
 
 /* Global PFA lock
  * Protects access to PFA (callers of sensitive PFA functions need to acquire
@@ -143,45 +184,7 @@ static inline uintptr_t pfa_vaddr_to_paddr(pte_t pte, uintptr_t vaddr)
          (vaddr & ~(~0ul << PAGE_SHIFT));
 }
 
-/* Convert a swp entry to a pfa pageID */
-static inline pfa_pgid_t pfa_swp_to_rpn(swp_entry_t ent)
-{
-  pfa_pgid_t rpn = 0;
-  /* This is pretty hacky. We assume 2 things:
-   * 1. Linux always uses the first swp device when evicting to PFA (probably
-   *    safe so long as it never fills up from non-PFA swap activity)
-   * 2. Linux swap offset only uses page_id bits (52). Probably safe since the
-   *    offset seems to be a monotonically increasing set of blockIDs (would need
-   *    to swap out PBs of data to overflow
-   */
-  PFA_ASSERT(swp_type(ent) == 0, "Swapping to swp device other than 0 (%d)",
-      swp_type(ent));
-  rpn = swp_offset(ent) + PFA_RPN_BASE;
-  PFA_ASSERT(rpn < (1ul << PFA_PGID_RPN_BITS), "Swap page offset too large (wouldn't fit in pgid)\n");
 
-  return rpn;
-}
-
-static inline pfa_pgid_t pfa_swp_to_pgid(swp_entry_t ent, int tsk_id)
-{
-  pfa_pgid_t pgid = pfa_swp_to_rpn(ent);
-  
-  PFA_ASSERT(tsk_id >= 0 && tsk_id < PFA_MAX_TASKS, "Invalid task id: %d\n", tsk_id);
-  pgid |= (pfa_pgid_t)(tsk_id << PFA_PGID_RPN_BITS);
-  return pgid;
-}
-
-/* Create a swp_entry_t from a pgid */
-static inline swp_entry_t pfa_pgid_to_swp(pfa_pgid_t pgid)
-{
-  int off = pfa_pgid_rpn(pgid) - PFA_RPN_BASE;
-  return swp_entry(0, off);
-}
-
-static inline int pfa_pgid_to_tsk(pfa_pgid_t pgid)
-{
-  return pfa_pgid_sw(pgid);
-}
 
 /* Create a remote pte */
 static inline pte_t pfa_mk_remote_pte(swp_entry_t swp_ent, pgprot_t prot,

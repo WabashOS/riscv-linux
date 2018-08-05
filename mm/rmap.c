@@ -1582,7 +1582,7 @@ static bool try_to_unmap_one(struct page *page, struct vm_area_struct *vma,
         /* Note: we check this here to ensure that code that works on the baseline will also work with the pfa */
         if(unlikely(page_mapcount(page) > 1)) {
           pfa_trace("Page (paddr=0x%llx) (pgid=0x%llx) shared %d times (sharing not supported in pfa)\n",
-          page_to_phys(page), pfa_swp_to_pgid(entry, tsk->pfa_tsk_id), page_mapcount(page));
+          page_to_phys(page), pfa_swp_to_pgid(entry, vma_to_task(vma)->pfa_tsk_id), page_mapcount(page));
         }
       }
 
