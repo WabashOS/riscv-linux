@@ -32,9 +32,6 @@
 #define pfa_warn(M, ...) printk("PFA_WARNING: " M, ##__VA_ARGS__)
 // #define pfa_warn(M, ...) 
 
-/* Returns the MAC address of the memory blade to use, given the current NIC's mac */
-#define pfa_dstmac(LOOPBACK_MAC) (LOOPBACK_MAC)
-
 #define vma_to_task(VMA) (VMA->vm_mm->owner)
 
 /* The PFA can only work for one task at a time right now. 
