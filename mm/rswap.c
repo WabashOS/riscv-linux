@@ -241,7 +241,9 @@ static int rswap_frontswap_store(unsigned type, pgoff_t offset,
   /* pfa_evict(pfa_swp_to_rpn(swp_entry(type, offset)), page_to_phys(page)); */
   return 0;
 #elif defined(CONFIG_PFA_SW_RMEM)
+  start = pfa_stat_clock();
   rmem_put(page_to_phys(page), pfa_swp_to_rpn(swp_entry(type, offset)));
+  pfa_stat_add(t_rmem_write, pfa_stat_clock() - start, NULL);
 	return 0;
 #endif
   start = pfa_stat_clock();
@@ -305,7 +307,10 @@ static int rswap_frontswap_load(unsigned type, pgoff_t offset,
   /* When using the PFA, the page data was already fetched. Do nothing here.*/
   return 0;
 #elif defined CONFIG_PFA_SW_RMEM
+  uint64_t start = pfa_stat_clock();
   rmem_get(page_to_phys(page), pfa_swp_to_rpn(swp_entry(type,offset)));
+  pfa_stat_add(t_rmem_read, pfa_stat_clock() - start, NULL);
+  pfa_stat_add(n_fetched, 1, NULL);
 	return 0;
 #endif
   uint64_t start = pfa_stat_clock();

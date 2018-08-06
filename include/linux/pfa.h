@@ -34,6 +34,9 @@
 
 #define vma_to_task(VMA) (VMA->vm_mm->owner)
 
+#if defined(CONFIG_PFA) || defined(CONFIG_PFA_SW_RMEM)
+// #if defined(CONFIG_PFA)
+
 /* The PFA can only work for one task at a time right now. 
  * NULL if no one has registered with the PFA. */
 #define PFA_MAX_TASKS 64 
@@ -101,9 +104,6 @@ static inline int pfa_pgid_to_tsk(pfa_pgid_t pgid)
 {
   return pfa_pgid_sw(pgid);
 }
-
-#if defined(CONFIG_PFA) || defined(CONFIG_PFA_SW_RMEM)
-// #if defined(CONFIG_PFA)
 
 /* Global PFA lock
  * Protects access to PFA (callers of sensitive PFA functions need to acquire
