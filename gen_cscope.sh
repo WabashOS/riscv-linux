@@ -8,6 +8,7 @@ find  $LNX                                                                \
     -path "$LNX/scripts*" -prune -o                                       \
     -path "$LNX/drivers*" -prune -o                                       \
     -path "$LNX/tools/*" -prune -o \
+    -path "$LNX/debian/*" -prune -o \
     -name "*.[chxsS]" -print > cscope.files
 
 # I can't make find exluce /arch/* except /arch/riscv, force it here

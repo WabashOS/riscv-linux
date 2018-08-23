@@ -345,7 +345,7 @@ int pfa_handle_fault(struct vm_fault *vmf)
   pfa_drain_newq(current->pfa_tsk_id);
 
 #ifdef CONFIG_PFA_KPFAD
-  kpfad_dec_sleeptime();
+  kpfad_dec_sleep();
 #endif
 
   pfa_unlock(global);
@@ -434,6 +434,8 @@ int pfa_set_tsk(struct task_struct *tsk)
 
 #ifdef CONFIG_PFA_KPFAD
   kpfad_tsk = kthread_run(kpfad, NULL, "kpfad");
+  // Hard-coded to only run on core 0 since experiments all run on cores 1-N
+  set_cpus_allowed_ptr(kpfad_tsk, cpumask_of(0));
 #endif
   return 1;
 }
@@ -466,7 +468,7 @@ static int kpfad(void *p)
   while(1) {
     uint64_t start = pfa_stat_clock();
     pfa_stat_add(n_kpfad, 1, NULL);
-    pfa_trace("kpfad running\n");
+    /* pfa_trace("kpfad running\n"); */
 
     if (kthread_should_stop())
       break;

@@ -397,10 +397,9 @@ struct page *__read_swap_cache_async(swp_entry_t entry, gfp_t gfp_mask,
 		 */
 #ifdef CONFIG_PFA
     if(!new_page && is_pfa_tsk(vma_to_task(vma))) {
+      pfa_trace("Getting new_page for addr: 0x%lx", addr);
       new_page = pfa_frameq_pop();
-    
-      if (!new_page)
-        break;		/* Out of memory */
+      PFA_ASSERT(new_page, "Bad page from frameq\n");
     } else {
 			new_page = alloc_page_vma(gfp_mask, vma, addr);
 			if (!new_page)
