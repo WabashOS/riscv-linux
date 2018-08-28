@@ -132,7 +132,7 @@ static int rmem_unit_test(void)
   int i;
   uint64_t put_start, get_start, put_cycles, get_cycles;
   /* uint64_t *pg = kmalloc(4096, GFP_KERNEL); */
-  uint64_t *pg = __get_free_page(GFP_KERNEL);
+  uint64_t *pg = (uint64_t*)__get_free_page(GFP_KERNEL);
   for(i = 0; i < (4096 / 8); i++) {
     pg[i] = 0xDEADBEEFCAFEBABE;
   }
@@ -156,7 +156,7 @@ static int rmem_unit_test(void)
     }
   }
  
-  free_page(pg);
+  free_page((uintptr_t)pg);
   printk("RMEM Put: %lld cycles\nRMEM Get: %lld cycles\n", put_cycles,
       get_cycles);
   return 1;
@@ -302,18 +302,19 @@ static int rswap_frontswap_load(unsigned type, pgoff_t offset,
   struct rswap_page *rpage;
   void *page_vaddr;
   int cpu;
+  uint64_t start;
 
 #ifdef CONFIG_PFA
   /* When using the PFA, the page data was already fetched. Do nothing here.*/
   return 0;
 #elif defined CONFIG_PFA_SW_RMEM
-  uint64_t start = pfa_stat_clock();
+  start = pfa_stat_clock();
   rmem_get(page_to_phys(page), pfa_swp_to_rpn(swp_entry(type,offset)));
   pfa_stat_add(t_rmem_read, pfa_stat_clock() - start, NULL);
   pfa_stat_add(n_fetched, 1, NULL);
 	return 0;
 #endif
-  uint64_t start = pfa_stat_clock();
+  start = pfa_stat_clock();
 
   /* Simulate a NW delay in non-PFA mode */
   ndelay(RMEM_READ_LAT);
@@ -382,7 +383,6 @@ static void rswap_frontswap_invalidate_area(unsigned type)
 
 static void rswap_frontswap_init(unsigned type)
 {
-  int i = 0;
 #if defined(CONFIG_PFA_SW_RMEM) || defined(CONFIG_PFA)
   spin_lock_init(&rmem_mut);
   mb_init();
@@ -390,10 +390,6 @@ static void rswap_frontswap_init(unsigned type)
   printk("Running memory blade unit test\n");
   if(!rmem_unit_test()) {
     printk("RMEM doesn't work, don't swap you fools!!!\n");
-  }
-  /* Run a total of 10 times to get a good measure of rmem-fetch latency */
-  for(i=0; i < 9; i++) {
-    rmem_unit_test();
   }
 #else
   init_rswap_pages(REMOTE_BUF_SIZE);

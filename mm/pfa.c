@@ -8,6 +8,7 @@
 #include <linux/pfa.h>
 #include <linux/pfa_stat.h>
 #include <linux/icenet_raw.h>
+#include <linux/memblade_client.h>
 #include "internal.h"
 
 #ifdef CONFIG_PFA
@@ -37,6 +38,17 @@ struct kobj_attribute pfa_sysfs_tsk = __ATTR(pfa_tsk, 0660, pfa_sysfs_show_tsk, 
 /* Global var. See pfa.h for details */
 struct task_struct *pfa_tsk[PFA_MAX_TASKS];
 
+#ifdef CONFIG_PFA_EM
+
+DEFINE_PQ(pfa_freeq, CONFIG_PFA_FREEQ_SIZE, uintptr_t);
+DECLARE_PQ(pfa_freeq, CONFIG_PFA_FREEQ_SIZE);
+
+DEFINE_PQ(pfa_new_id, CONFIG_PFA_NEWQ_SIZE, pfa_pgid_t);
+DECLARE_PQ(pfa_new_id, CONFIG_PFA_NEWQ_SIZE);
+DEFINE_PQ(pfa_new_vaddr, CONFIG_PFA_NEWQ_SIZE, uintptr_t);
+DECLARE_PQ(pfa_new_vaddr, CONFIG_PFA_NEWQ_SIZE);
+
+#else
 /* After initialization, points to the kernel MMIO addresses for the PFA */
 void __iomem *pfa_io_free;
 void __iomem *pfa_io_freestat;
@@ -46,13 +58,12 @@ void __iomem *pfa_io_newpgid;
 void __iomem *pfa_io_newvaddr;
 void __iomem *pfa_io_newstat;
 void __iomem *pfa_io_dstmac;
+#endif
 
 /* Holds every frame (struct page*) that is given to the PFA in FIFO order */
 #define PFA_FRAMEQ_MAX (CONFIG_PFA_FREEQ_SIZE + CONFIG_PFA_NEWQ_SIZE)
-int pfa_frameq_head = 0;
-int pfa_frameq_tail = 0;
-int pfa_frameq_size = 0;
-struct page* pfa_frameq[PFA_FRAMEQ_MAX] = {NULL};
+DEFINE_PQ(pfa_frameq, PFA_FRAMEQ_MAX, struct page*);
+DECLARE_PQ(pfa_frameq, PFA_FRAMEQ_MAX);
 
 /* kpfad settings */
 struct task_struct *kpfad_tsk = NULL;
@@ -88,6 +99,116 @@ static inline void kpfad_dec_sleep(void)
 }
 
 /* Local Functions */
+#ifdef CONFIG_PFA_EM
+static void pfa_write_freeq(uintptr_t frame_paddr)
+{
+  PQ_PUSH(pfa_freeq, frame_paddr);
+}
+
+static uintptr_t pfa_freeq_pop(void)
+{
+  uintptr_t paddr;
+  PQ_POP(pfa_freeq, paddr);
+  return paddr;
+}
+
+static uint64_t pfa_read_freestat(void)
+{
+  return CONFIG_PFA_FREEQ_SIZE - PQ_CNT(pfa_freeq);
+}
+
+static void pfa_write_evictq(uint64_t ev)
+{
+  uintptr_t page_paddr = (ev & ((1l << PFA_EVICT_RPN_SHIFT) - 1)) << PAGE_SHIFT;
+  uint32_t rpn = (uint32_t)(ev >> PFA_EVICT_RPN_SHIFT);
+
+  mb_send(page_paddr, (uintptr_t)NULL, MB_OC_PAGE_WRITE, rpn);
+  mb_wait();
+  return;
+}
+
+static int64_t pfa_read_evictstat(void)
+{
+  return 1;
+}
+
+static pfa_pgid_t pfa_read_newpgid(void)
+{
+  uintptr_t vaddr;
+  PQ_POP(pfa_new_id, vaddr);
+  return vaddr;
+}
+ 
+static void pfa_push_newpgid(pfa_pgid_t pgid)
+{
+  PQ_PUSH(pfa_new_id, pgid);
+}
+
+static pfa_pgid_t pfa_read_newvaddr(void)
+{
+  pfa_pgid_t id;
+  PQ_POP(pfa_new_vaddr, id);
+  return id;
+}
+ 
+static void pfa_push_newvaddr(uintptr_t vaddr)
+{
+  PQ_PUSH(pfa_new_vaddr, vaddr);
+}
+ 
+static int64_t pfa_read_newstat(void)
+{
+  PFA_ASSERT(PQ_CNT(pfa_new_vaddr) == PQ_CNT(pfa_new_id),
+      "newID and newVADDR queues out of sync");
+  return PQ_CNT(pfa_new_vaddr);
+}
+
+static void pfa_write_dstmac(uint64_t dstmac)
+{
+  return;
+}
+#else
+static void pfa_write_freeq(uintptr_t frame_paddr)
+{
+  writeq(frame_paddr, pfa_io_free);
+}
+
+static uint64_t pfa_read_freestat(void)
+{
+  return readq(pfa_io_freestat);
+}
+
+static void pfa_write_evictq(uint64_t ev)
+{
+  writeq(ev, pfa_io_evict);
+}
+
+static uint64_t pfa_read_evictstat(void)
+{
+  return readq(pfa_io_evictstat);
+}
+
+static pfa_pgid_t pfa_read_newpgid(void)
+{
+  return (pfa_pgid_t)readq(pfa_io_newpgid);
+}
+ 
+static uintptr_t pfa_read_newvaddr(void)
+{
+  return readq(pfa_io_newvaddr);
+}
+  
+static uint64_t pfa_read_newstat(void)
+{
+  return readq(pfa_io_newstat);
+}
+
+static void pfa_write_dstmac(uint64_t dstmac)
+{
+  writeq(dstmac, pfa_io_dstmac);
+}
+#endif
+
 /* Add the frame at pfn to the list of free frames for the pfa.
  * pfn - the page frame number to be added 
  */
@@ -111,6 +232,7 @@ void pfa_init(uint64_t memblade_mac)
     if(sysfs_create_file(mm_kobj, &pfa_sysfs_tsk.attr) != 0)
           pr_err("Failed to create sysfs entries\n");
   
+#ifndef CONFIG_PFA_EM
   /* Setup MMIO */
   pfa_io_free = ioremap(PFA_IO_FREEFRAME, 8);
   pfa_io_freestat = ioremap(PFA_IO_FREESTAT, 8);
@@ -120,10 +242,10 @@ void pfa_init(uint64_t memblade_mac)
   pfa_io_newvaddr = ioremap(PFA_IO_NEWVADDR, 8);
   pfa_io_newstat = ioremap(PFA_IO_NEWSTAT, 8);
   pfa_io_dstmac = ioremap(PFA_IO_DSTMAC, 8);
+#endif
 
   /* PFA currently only supports one memoryblade, statically configured */
-  /* writeq(pfa_dstmac(memblade_mac), pfa_io_dstmac); */
-  writeq(CONFIG_MEMBLADE_MAC, pfa_io_dstmac);
+  pfa_write_dstmac(CONFIG_MEMBLADE_MAC);
 
   return;
 }
@@ -132,8 +254,9 @@ static void pfa_evict_poll(void)
 {
   /* Wait for completion */
   mb();
-  while(readq(pfa_io_evictstat) < CONFIG_PFA_EVICTQ_SIZE) { cpu_relax(); }
+  while(pfa_read_evictstat() < CONFIG_PFA_EVICTQ_SIZE) { cpu_relax(); }
   mb();
+  return;
 }
 
 /* Evict a page to the pfa.
@@ -147,12 +270,13 @@ void pfa_evict(uintptr_t rpn, phys_addr_t page_paddr)
   uint64_t start;
 
   pfa_trace("Actual eviction: (rpn=0x%lx) (paddr=0x%llx)\n", rpn, page_paddr);
+
 #ifdef CONFIG_PFA_DEBUG
   /* I'm not sure if this is possible in Linux, but free frames may end up on
    * the lru lists and get re-selected for eviction. */
-  if(pfa_frameq_search(page_paddr)) {
-      panic("Evicting frame on frameq: (paddr=0x%llx)\n", page_paddr);
-  }
+  /* if(pfa_frameq_search(page_paddr)) { */
+  /*     panic("Evicting frame on frameq: (paddr=0x%llx)\n", page_paddr); */
+  /* } */
 #endif
 
   /* Form the packed eviction value defined in pfa spec */
@@ -164,7 +288,7 @@ void pfa_evict(uintptr_t rpn, phys_addr_t page_paddr)
   
   /* I'm 99% sure we don't need to lock here because these steps are all atomic and
    * we don't touch other global PFA datastructures. */
-  writeq(evict_val, pfa_io_evict);
+  pfa_write_evictq(evict_val);
   pfa_evict_poll();
 }
 
@@ -174,13 +298,8 @@ void pfa_evict(uintptr_t rpn, phys_addr_t page_paddr)
 static void pfa_free(struct page* pg)
 {
   pfa_trace("Adding (paddr=0x%lx) to freelist\n", (unsigned long)page_to_phys(pg));
-  writeq(page_to_phys(pg), pfa_io_free);
+  pfa_write_freeq(page_to_phys(pg));
   pfa_frameq_push(pg);
-}
-
-int64_t pfa_nnew(void)
-{
-  return readq(pfa_io_newstat);
 }
 
 /* Process one entry from the newq.
@@ -209,12 +328,12 @@ static void pfa_new(int mmap_sem_tsk)
   uint64_t cycles = pfa_stat_clock();
 
 #ifdef CONFIG_PFA_DEBUG
-  PFA_ASSERT(readq(pfa_io_newstat) != 0, "Trying to pop empty newq\n");
+  PFA_ASSERT(pfa_read_newstat() != 0, "Trying to pop empty newq\n");
 #endif
 
   /* Get the new page info from newq and frameq */
-  vmf.address = readq(pfa_io_newvaddr) & PAGE_MASK;
-  new_pgid = (pfa_pgid_t)readq(pfa_io_newpgid);
+  vmf.address = pfa_read_newvaddr() & PAGE_MASK;
+  new_pgid = pfa_read_newpgid();
   
   entry = pfa_pgid_to_swp(new_pgid);
   
@@ -286,7 +405,7 @@ void pfa_drain_newq(int mmap_sem_tsk)
 
   pfa_assert_lock(global);
 
-  nnew = readq(pfa_io_newstat);
+  nnew = pfa_read_newstat();
   if(nnew) 
     pfa_trace("Draining %lld items from newq\n", nnew);
 
@@ -305,7 +424,7 @@ void pfa_fill_freeq(void)
   
   pfa_assert_lock(global);
   
-  nframe = readq(pfa_io_freestat);
+  nframe = pfa_read_freestat();
 
   while(nframe) {
     /* This might block or trigger swapping which would be bad if we call
@@ -327,9 +446,17 @@ void pfa_fill_freeq(void)
 
 int pfa_handle_fault(struct vm_fault *vmf)
 {
-  pfa_trace("Page fault received on remote page (vaddr=0x%lx) (tsk=%d)\n",
+#ifdef CONFIG_PFA_EM
+  uintptr_t dst_paddr;
+  pfa_pgid_t pgid;
+  uintptr_t rpn;
+  pte_t lpte;
+#endif
+
+  pfa_trace("Page fault received on remote page (vaddr=0x%lx) (tsk=%d) (pte=0x%llx)\n",
       vmf->address & PAGE_MASK,
-      current->pfa_tsk_id);
+      current->pfa_tsk_id,
+      pte_val(*(vmf->pte)));
   pfa_stat_add(n_pfa_fault, 1, current);
 
   /* Note: we must already hold mm->mmap_sem or we could deadlock with kpfad */
@@ -340,9 +467,42 @@ int pfa_handle_fault(struct vm_fault *vmf)
     return VM_FAULT_SIGBUS;
   }
 
+#ifdef CONFIG_PFA_EM
+  // If either needs attention, we service both (to match non-emulated behavior)
+  if(pfa_read_freestat() == CONFIG_PFA_FREEQ_SIZE ||
+     pfa_read_newstat() == CONFIG_PFA_NEWQ_SIZE) {
+    pfa_trace("handling queues. freestat=%llu, newstat=%llu\n", pfa_read_freestat(), pfa_read_newstat());
+    pfa_fill_freeq();
+    pfa_drain_newq(current->pfa_tsk_id);
+  }
+  
+  // Bring in the new page
+  dst_paddr = pfa_freeq_pop();
+  pgid = pfa_remote_to_pgid(vmf->orig_pte);
+  rpn = pfa_pgid_rpn(pgid);
+  PFA_ASSERT(dst_paddr != 0, "NULL destination!");
+  pfa_trace("Placing rpn 0x%lx into paddr 0x%lx for vaddr 0x%lx\n",
+      rpn,
+      dst_paddr,
+      vmf->address);
+  mb_send((uintptr_t)NULL, dst_paddr, MB_OC_PAGE_READ, rpn);
+  mb_wait();
+  
+  // Update metadata
+  pfa_push_newpgid(pgid);
+  pfa_push_newvaddr(vmf->address);
+
+  // Create new local PTE
+  lpte = pfa_remote_to_local(vmf->orig_pte, dst_paddr);
+  set_pte_at(vmf->vma->vm_mm, vmf->address, vmf->pte, lpte);
+  vmf->orig_pte = lpte;
+
+#else
+  /* We should only see a fault with the PFA enabled if the queues need draining */
   /* It's OK to call these even if their queues don't need processing */
   pfa_fill_freeq();
   pfa_drain_newq(current->pfa_tsk_id);
+#endif
 
 #ifdef CONFIG_PFA_KPFAD
   kpfad_dec_sleep();
@@ -350,7 +510,7 @@ int pfa_handle_fault(struct vm_fault *vmf)
 
   pfa_unlock(global);
 
-  /* Even though we didn't change the PTE, we must flush pte from the TLB
+  /* Even if we didn't change the PTE, we must flush pte from the TLB
    * to trigger another PT walk (at least on Rocket) */
 	update_mmu_cache(vmf->vma, vmf->address, vmf->pte);
 
@@ -360,14 +520,8 @@ int pfa_handle_fault(struct vm_fault *vmf)
 void pfa_frameq_push(struct page *frame)
 {
   pfa_assert_lock(global);
-  PFA_ASSERT(pfa_frameq_size != PFA_FRAMEQ_MAX, "Pushing to full frameq\n");
-  PFA_ASSERT(!pfa_frameq_search(page_to_phys(frame)), "Frame already on frameq\n");
 
-  pfa_frameq[pfa_frameq_head] = frame;
-
-  pfa_frameq_head = (pfa_frameq_head + 1) % PFA_FRAMEQ_MAX;
-  pfa_frameq_size++;
-
+  PQ_PUSH(pfa_frameq, frame);
   return;
 }
 
@@ -376,35 +530,9 @@ struct page* pfa_frameq_pop(void)
   struct page *ret;
 
   pfa_assert_lock(global);
-  PFA_ASSERT(pfa_frameq_size != 0, "Popping from empty frameq\n");
-  
-  ret = pfa_frameq[pfa_frameq_tail];
-  PFA_ASSERT(ret != NULL, "FrameQ Corrupted\n");
-  
-  pfa_frameq[pfa_frameq_tail] = NULL;
-
-  pfa_frameq_tail = (pfa_frameq_tail + 1) % PFA_FRAMEQ_MAX;
-  pfa_frameq_size--;
+  PQ_POP(pfa_frameq, ret);
 
   return ret;
-}
-
-int pfa_frameq_search(uintptr_t paddr)
-{
-  int i;
-  
-  /* pfa_assert_lock(); */
-  for(i = pfa_frameq_tail; i != pfa_frameq_head; i = (i + 1) % PFA_FRAMEQ_MAX)
-  {
-    if(pfa_frameq[i] == NULL) {
-      panic("Invalid frameq entry\n");
-    }
-    if(page_to_phys(pfa_frameq[i]) == paddr) {
-      return 1;
-    }
-  }
-
-  return 0;
 }
 
 int pfa_set_tsk(struct task_struct *tsk)

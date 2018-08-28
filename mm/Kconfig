@@ -504,6 +504,15 @@ config PFA
 
     If you don't know what this is, don't turn it on.
 
+config PFA_EM
+  bool "Emulate PFA behavior in software"
+  depends on PFA
+  default n
+  help
+    This mode strives to emulate pfa behavior as closely as possible in software.
+    It is mostly intended for debugging. It's not a great baseline (use
+    PFA_SW_RMEM for a better baseline performance comparison).
+
 config PFA_SW_RMEM
   bool "Use the network-attached memory blade through software"
   depends on ! PFA

@@ -8,6 +8,34 @@
 #include <linux/mutex.h>
 #include <linux/pfa_stat.h>
 
+/* A generic in-place queue (no pointers) */
+#define DEFINE_PQ(NAME, SIZE, TYPE) typedef struct { \
+  int head; \
+  int tail; \
+  int cnt; \
+  int size; \
+  TYPE q[SIZE]; \
+} NAME##_t
+
+#define DECLARE_PQ(NAME, SIZE) NAME##_t NAME = {0, 0, 0, SIZE, {0} }
+
+#define PQ_PUSH(Q, VAL) do { \
+  PFA_ASSERT(Q.cnt != Q.size, "Pushing to full queue");  \
+  Q.q[Q.head] = VAL;         \
+  Q.head = (Q.head + 1) % Q.size; \
+  Q.cnt++; \
+} while(0)
+
+/* Note: you can't use this like a normal function (it doesn't return anything)
+ * you need to provide the destination to store into (literal symbol, not a pointer) */
+#define PQ_POP(Q, DST) do { \
+  PFA_ASSERT(Q.cnt != 0, "Popping from empty queue"); \
+  DST = Q.q[Q.tail]; \
+  Q.tail = (Q.tail + 1) % Q.size; \
+  Q.cnt--; \
+} while (0)
+
+#define PQ_CNT(Q) Q.cnt
 #ifdef CONFIG_PFA_DEBUG
 /* Linux BUG_ON acts really weird (sometimes crashes in strange ways), plus it
  * doesn't print out as much info as I'd like */
@@ -199,10 +227,31 @@ static inline pte_t pfa_mk_remote_pte(swp_entry_t swp_ent, pgprot_t prot,
        );
 }
 
-/* Retrieve the swp_entry_t from a remote pte */
-static inline swp_entry_t pfa_remote_to_swp(pte_t ptep)
+static inline pte_t pfa_remote_to_local(pte_t rpte, uintptr_t paddr)
 {
-  return pfa_pgid_to_swp((pfa_pgid_t)(pte_val(ptep) >> PFA_PGID_SHIFT));
+  uint64_t lpte = pte_val(rpte);
+  // Mask off the pgid
+  lpte &= (1 << PFA_PGID_SHIFT) - 1;
+  // Move the prot bits into the right place for a local pte
+  lpte >>=  PFA_PROT_SHIFT;
+  // Mask in the ppn
+  lpte |= (paddr & PAGE_MASK) >> 2;
+  
+  // Clear pgid
+  // lpte &= ~(PAGE_MASK);
+  // lpte |= paddr & PAGE_MASK;
+  return __pte(lpte);
+}
+
+/* Retrieve the swp_entry_t from a remote pte */
+static inline swp_entry_t pfa_remote_to_swp(pte_t pte)
+{
+  return pfa_pgid_to_swp((pfa_pgid_t)(pte_val(pte) >> PFA_PGID_SHIFT));
+}
+
+static inline pfa_pgid_t pfa_remote_to_pgid(pte_t pte)
+{
+  return (pfa_pgid_t)(pte_val(pte) >> PFA_PGID_SHIFT);
 }
 
 /* The frameq should hold frames in the PFA in FIFO order. 

@@ -1347,6 +1347,10 @@ static bool try_to_unmap_one(struct page *page, struct vm_area_struct *vma,
 	bool ret = true;
 	unsigned long start = address, end;
 	enum ttu_flags flags = (enum ttu_flags)arg;
+#ifdef CONFIG_PFA
+  struct task_struct *tsk;
+  uint64_t t_start;
+#endif
 
   /* XXX PFA
    * Track the last evicted vaddr, used for unit tests */
@@ -1587,8 +1591,7 @@ static bool try_to_unmap_one(struct page *page, struct vm_area_struct *vma,
       }
 
 #ifdef CONFIG_PFA
-      struct task_struct *tsk = vma_to_task(vma);
-      uint64_t start;
+      tsk = vma_to_task(vma);
       /* We have the most info about the eviction here, even though the
        * actual eviction happens in rswap_frontswap_store */
       pfa_trace("Evicting page (vaddr=0x%lx) (paddr=0x%llx) (pgid=0x%llx) (tsk=%d) (pid=%d)\n",
@@ -1611,9 +1614,9 @@ static bool try_to_unmap_one(struct page *page, struct vm_area_struct *vma,
        * is likely wrong for multiple threads (at least on multiple cores)
        * because one thread with a stale TLB could theoretically write to the
        * page before the TLB is flushed (final flush happens in shrink_page_list()). */
-      start = pfa_stat_clock();
+      t_start = pfa_stat_clock();
       pfa_evict(pfa_swp_to_rpn(entry), page_to_phys(page));
-      pfa_stat_add(t_rmem_write, pfa_stat_clock() - start, tsk);
+      pfa_stat_add(t_rmem_write, pfa_stat_clock() - t_start, tsk);
 
       /* Rocket doesn't set these in HW, it causes traps instead. By setting
        * these pre-emptively, we avoid those traps */
