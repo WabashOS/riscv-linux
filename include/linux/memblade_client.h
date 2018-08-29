@@ -1,5 +1,14 @@
 #include <linux/types.h>
 
+#ifdef CONFIG_MEMBLADE_EM
+// Size of remote memory (in terms of pages). Note that 256 pages == 1MB.
+#define MEMBLADE_NPG (256*256)
+
+// Size of remote memory in bytes
+#define MEMBLADE_SZ (MEMBLADE_NPG*PAGE_SIZE)
+#endif
+
+// Opcodes
 #define MB_OC_PAGE_READ 0
 #define MB_OC_PAGE_WRITE 1
 #define MB_OC_WORD_READ 2
@@ -7,6 +16,7 @@
 #define MB_OC_ATOMIC_ADD 4
 #define MB_OC_COMP_SWAP 5
 
+// MMIO addrs
 #define MB_BASE       0x10018000L
 #define MB_SRC_ADDR   (MB_BASE + 0x00)
 #define MB_DST_ADDR   (MB_BASE + 0x08)
@@ -26,7 +36,7 @@
  * opcode: Must be one of the MB_OC above
  * pageno: Remote page number to use
  *
- * returns: txid for this request
+ * returns: txid for this request.
  */
 int mb_send(uintptr_t src_paddr, uintptr_t dst_paddr,
 		int opcode, uint64_t pageno);

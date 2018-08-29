@@ -1,5 +1,161 @@
 #include "linux/memblade_client.h"
 #include <linux/io.h>
+#include <linux/highmem.h>
+
+#ifdef CONFIG_MEMBLADE_EM
+
+// Global, pre-allocated 'remote memory' to be used in emulation mode
+uint8_t *mb_rmem;
+
+// Global txid (increases monotonically)
+int mb_txid = -1;
+
+/* Returns a reference to the 'remote' page corresponding to pageno.
+ * This page is somewhere in addressable space and can be freely
+ * read/written, no need to free or "put" the page after */
+static uint8_t *mb_pg_get(uint64_t pageno)
+{
+  if(pageno > MEMBLADE_NPG) {
+    pr_err("Requested invalid remote page from memblade: %lld\n", pageno);
+    return NULL;
+  }
+  return mb_rmem + (pageno*PAGE_SIZE);
+}
+
+static int mb_pg_read(uint64_t pageno, uintptr_t paddr)
+{
+  // Remote and user pages respecively
+  uint8_t *rpg, *upg;
+  
+  rpg = mb_pg_get(pageno);
+  if(!rpg) {
+    return 0;
+  }
+
+  upg = kmap_atomic(phys_to_page(paddr));
+  memcpy(upg, rpg, PAGE_SIZE);
+  kunmap_atomic(upg);
+  
+  return 1;
+}
+
+static int mb_pg_write(uint64_t pageno, uintptr_t paddr)
+{
+  // Remote and user pages respecively
+  uint8_t *rpg, *upg;
+  
+  rpg = mb_pg_get(pageno);
+  if(!rpg) {
+    return 0;
+  }
+
+  upg = kmap_atomic(phys_to_page(paddr));
+  memcpy(rpg, upg, PAGE_SIZE);
+  kunmap_atomic(upg);
+  
+  return 1;
+}
+
+static int mb_wd_read(uint64_t pageno, uintptr_t paddr)
+{
+  // Remote and user pages respecively
+  uint8_t *rpg, *upg;
+  off_t off = paddr - (paddr & PAGE_MASK);
+
+  if((paddr & 0x111) != 0) {
+    pr_err("Memblade word read to unaligned address: %lx\n", paddr);
+  }
+
+  rpg = mb_pg_get(pageno);
+  if(!rpg) {
+    return 0;
+  }
+
+  upg = kmap_atomic(phys_to_page(paddr));
+  memcpy(upg + off, rpg + off, 8);
+  kunmap_atomic(upg);
+  
+  return 1;
+}
+
+static int mb_wd_write(uint64_t pageno, uintptr_t paddr)
+{
+  // Remote and user pages respecively
+  uint8_t *rpg, *upg;
+  off_t off = paddr - (paddr & PAGE_MASK);
+
+  if((paddr & 0x111) != 0) {
+    pr_err("Memblade word write from unaligned address: %lx\n", paddr);
+  }
+
+  rpg = mb_pg_get(pageno);
+  if(!rpg) {
+    return 0;
+  }
+
+  upg = kmap_atomic(phys_to_page(paddr));
+  memcpy(rpg + off, upg + off, 8);
+  kunmap_atomic(upg);
+  
+  return 1;
+}
+
+int mb_send(
+		uintptr_t src_paddr, uintptr_t dst_paddr,
+		int opcode, uint64_t pageno)
+{
+  if(!mb_rmem) {
+    pr_err("Memory blade not initialized, ignoring request\n");
+    return -1;
+  }
+
+  switch(opcode) {
+    case MB_OC_PAGE_READ:
+      if(!mb_pg_read(pageno, dst_paddr))
+        return -1;
+      break;
+    case MB_OC_PAGE_WRITE:
+      if(!mb_pg_write(pageno, src_paddr))
+        return -1;
+      break;
+    case MB_OC_WORD_READ:
+      if(!mb_wd_read(pageno, dst_paddr))
+        return -1;
+      break;
+    case MB_OC_WORD_WRITE:
+      if(!mb_wd_write(pageno, src_paddr))
+        return -1;
+      break;
+    case MB_OC_ATOMIC_ADD:
+      panic("Memblade atomic add not implemented\n");
+      break;
+    case MB_OC_COMP_SWAP:
+      panic("Memblade comp/swap not implemented\n");
+      break;
+    default:
+      panic("Unrecognized memory blade opcode: %d", opcode);
+      break;
+  }
+
+  mb_txid++;
+  return mb_txid;
+}
+
+int mb_wait()
+{
+  return mb_txid;
+}
+
+void mb_init(void)
+{
+  /* mb_rmem = (void*)__get_free_pages(GFP_KERNEL, get_order(MEMBLADE_SZ)); */
+  mb_rmem = (void*)vmalloc(MEMBLADE_SZ);
+  if(!mb_rmem) {
+    pr_err("Memory blade emulation failed to initialize.\n");
+  }
+}
+
+#else
 
 void __iomem *mb_io_src;
 void __iomem *mb_io_dst;
@@ -48,3 +204,5 @@ void mb_init(void)
   /* Hard-coded for now for Spike loopback model, need to fix for real HW */
   mb_dstmac = CONFIG_MEMBLADE_MAC;
 }
+
+#endif

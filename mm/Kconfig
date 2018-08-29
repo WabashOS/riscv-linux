@@ -520,6 +520,12 @@ config PFA_SW_RMEM
     The OS will swap by directly communicating with the remote memory blade
     over the network.
   
+config MEMBLADE_EM
+  bool "Emulate the remote memory blade in local memory"
+  help
+    The OS will use a local emulation of the remote memory blade (all remote
+    memory operations go to pre-allocated buffers in the kernel instead).
+
 config PFA_VERBOSE
   bool "Verbose logging for PFA-related activities\n"
   default n
