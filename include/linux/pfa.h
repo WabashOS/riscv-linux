@@ -62,8 +62,7 @@
 
 #define vma_to_task(VMA) (VMA->vm_mm->owner)
 
-#if defined(CONFIG_PFA) || defined(CONFIG_PFA_SW_RMEM)
-// #if defined(CONFIG_PFA)
+// #if defined(CONFIG_PFA) || defined(CONFIG_PFA_SW_RMEM)
 
 /* The PFA can only work for one task at a time right now. 
  * NULL if no one has registered with the PFA. */
@@ -308,7 +307,5 @@ static inline struct task_struct *pfa_get_tsk(int tsk_id)
   PFA_ASSERT((tsk_id < PFA_MAX_TASKS && tsk_id >= 0), "Invalid task ID: %d", tsk_id);
   return pfa_tsk[tsk_id];
 }
-
-#endif //ifdef CONFIG_PFA
 
 #endif //ifdef __PFA_H__

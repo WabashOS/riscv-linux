@@ -513,13 +513,6 @@ config PFA_EM
     It is mostly intended for debugging. It's not a great baseline (use
     PFA_SW_RMEM for a better baseline performance comparison).
 
-config PFA_SW_RMEM
-  bool "Use the network-attached memory blade through software"
-  depends on ! PFA
-  help
-    The OS will swap by directly communicating with the remote memory blade
-    over the network.
-  
 config MEMBLADE_EM
   bool "Emulate the remote memory blade in local memory"
   help
