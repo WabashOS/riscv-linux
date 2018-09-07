@@ -61,7 +61,8 @@ void __iomem *pfa_io_dstmac;
 #endif
 
 /* Holds every frame (struct page*) that is given to the PFA in FIFO order */
-#define PFA_FRAMEQ_MAX (CONFIG_PFA_FREEQ_SIZE + CONFIG_PFA_NEWQ_SIZE)
+/* #define PFA_FRAMEQ_MAX (CONFIG_PFA_FREEQ_SIZE + CONFIG_PFA_NEWQ_SIZE) */
+#define PFA_FRAMEQ_MAX (CONFIG_PFA_FREEQ_SIZE)
 DEFINE_PQ(pfa_frameq, PFA_FRAMEQ_MAX, struct page*);
 DECLARE_PQ(pfa_frameq, PFA_FRAMEQ_MAX);
 
@@ -453,7 +454,7 @@ int pfa_handle_fault(struct vm_fault *vmf)
   pte_t lpte;
 #endif
 
-  pfa_trace("Page fault received on remote page (vaddr=0x%lx) (tsk=%d) (pte=0x%llx)\n",
+  pfa_trace("Page fault received on remote page (vaddr=0x%lx) (tsk=%d) (pte=0x%lx)\n",
       vmf->address & PAGE_MASK,
       current->pfa_tsk_id,
       pte_val(*(vmf->pte)));
@@ -472,8 +473,12 @@ int pfa_handle_fault(struct vm_fault *vmf)
   if(pfa_read_freestat() == CONFIG_PFA_FREEQ_SIZE ||
      pfa_read_newstat() == CONFIG_PFA_NEWQ_SIZE) {
     pfa_trace("handling queues. freestat=%llu, newstat=%llu\n", pfa_read_freestat(), pfa_read_newstat());
-    pfa_fill_freeq();
     pfa_drain_newq(current->pfa_tsk_id);
+    // XXX PFA: just for debugging, delete this (only works in pfa_em mode)
+    /* PFA_ASSERT(PQ_CNT(pfa_frameq) == PQ_CNT(pfa_freeq) + PQ_CNT(pfa_new_id), "frameq invalid after drain_newq\n"); */
+    pfa_fill_freeq();
+    // XXX PFA: just for debugging, delete this (only works in pfa_em mode)
+    /* PFA_ASSERT(PQ_CNT(pfa_frameq) == PQ_CNT(pfa_freeq) + PQ_CNT(pfa_new_id), "frameq invalid after fill_freeq\n"); */
   }
   
   // Bring in the new page

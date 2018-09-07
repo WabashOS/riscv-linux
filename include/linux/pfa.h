@@ -20,6 +20,7 @@
 #define DECLARE_PQ(NAME, SIZE) NAME##_t NAME = {0, 0, 0, SIZE, {0} }
 
 #define PQ_PUSH(Q, VAL) do { \
+  pfa_assert_lock(global); \
   PFA_ASSERT(Q.cnt != Q.size, "Pushing to full queue");  \
   Q.q[Q.head] = VAL;         \
   Q.head = (Q.head + 1) % Q.size; \
@@ -29,6 +30,7 @@
 /* Note: you can't use this like a normal function (it doesn't return anything)
  * you need to provide the destination to store into (literal symbol, not a pointer) */
 #define PQ_POP(Q, DST) do { \
+  pfa_assert_lock(global); \
   PFA_ASSERT(Q.cnt != 0, "Popping from empty queue"); \
   DST = Q.q[Q.tail]; \
   Q.tail = (Q.tail + 1) % Q.size; \
@@ -52,12 +54,12 @@
 
 #ifdef CONFIG_PFA_VERBOSE
 /* Use this for noisy messages you might want to turn off */
-#define pfa_trace(M, ...) printk("PFA_TRACE: " M, ##__VA_ARGS__)
+#define pfa_trace(M, ...) printk(KERN_DEBUG "PFA_TRACE: " M, ##__VA_ARGS__)
 #else
 #define pfa_trace(M, ...)
 #endif
 
-#define pfa_warn(M, ...) printk("PFA_WARNING: " M, ##__VA_ARGS__)
+#define pfa_warn(M, ...) printk(KERN_WARNING "PFA_WARNING: " M, ##__VA_ARGS__)
 // #define pfa_warn(M, ...) 
 
 #define vma_to_task(VMA) (VMA->vm_mm->owner)
