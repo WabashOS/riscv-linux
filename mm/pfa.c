@@ -25,7 +25,7 @@
 #define PFA_IO_DSTMAC              (PFA_IO_BASE + 56)
 
 DECLARE_RWSEM(pfa_mutex_global);
-DECLARE_RWSEM(pfa_mutex_evict);
+spinlock_t pfa_evict_mut;
 
 /* sysfs stuff */
 ssize_t pfa_sysfs_show_tsk(struct kobject *kobj,
@@ -37,6 +37,10 @@ struct kobj_attribute pfa_sysfs_tsk = __ATTR(pfa_tsk, 0660, pfa_sysfs_show_tsk, 
 
 /* Global var. See pfa.h for details */
 struct task_struct *pfa_tsk[PFA_MAX_TASKS];
+
+/* Deferred pfa logging */
+uint8_t *pfa_log;
+size_t pfa_log_end = 0;
 
 #ifdef CONFIG_PFA_EM
 
@@ -84,6 +88,223 @@ size_t kpfad_sleeptime = 10000; /* how long to sleep (in us)*/
 /* XXX PFA should I do percents instead? */
 #define KPFAD_SLEEP_DEC 1000
 #define KPFAD_SLEEP_INC 100
+
+#ifdef CONFIG_PFA_DEBUG
+static int pg_cmp(uint64_t *p1, uint64_t *p2)
+{
+  int i;
+  for(i = 0; i < 4096 / sizeof(uint64_t); i++)
+  {
+    if(p1[i] != p2[i]) {
+      printk("Pages mismatch at index %d (%llx != %llx)\n", i, p1[i], p2[i]);
+      return 1;
+    }
+  }
+  return 0;
+}
+
+DEFINE_HASHTABLE(pfa_dbg_page, 12);
+dbg_page_t *pfa_dbg_page_freeent;
+uint8_t *pfa_dbg_page_freepg;
+HLIST_HEAD(pfa_dbg_page_free);
+DEFINE_SPINLOCK(pfa_dbg_page_lock);
+
+void pfa_dbg_record_page(void *pg, uintptr_t vaddr, void *priv)
+{
+  unsigned long flags;
+  dbg_page_t *ent;
+  spin_lock_irqsave(&pfa_dbg_page_lock, flags);
+  PFA_ASSERT(!hlist_empty(&pfa_dbg_page_free), "debug page list full\n");
+  ent = hlist_entry(pfa_dbg_page_free.first, dbg_page_t, _hash);
+  hlist_del(&(ent->_hash));
+
+  memcpy(ent->pg, pg, PAGE_SIZE);
+  ent->vaddr = vaddr;
+  ent->priv = priv;
+
+  hash_add(pfa_dbg_page, &(ent->_hash), ent->vaddr);
+  spin_unlock_irqrestore(&pfa_dbg_page_lock, flags);
+}
+
+dbg_page_t *pfa_dbg_get_page(uintptr_t vaddr)
+{
+  unsigned long flags;
+  dbg_page_t *ent;
+
+  spin_lock_irqsave(&pfa_dbg_page_lock, flags);
+  hash_for_each_possible(pfa_dbg_page, ent, _hash, vaddr) {
+    if(ent->vaddr == vaddr) {
+      spin_unlock_irqrestore(&pfa_dbg_page_lock, flags);
+      return ent;
+    }
+  }
+  spin_unlock_irqrestore(&pfa_dbg_page_lock, flags);
+  return NULL;
+}
+
+void pfa_dbg_free_page(dbg_page_t *ent)
+{
+  unsigned long flags;
+  spin_lock_irqsave(&pfa_dbg_page_lock, flags);
+  hash_del(&(ent->_hash));
+  hlist_add_head(&(ent->_hash), &(pfa_dbg_page_free));
+  spin_unlock_irqrestore(&pfa_dbg_page_lock, flags);
+}
+
+#endif
+
+/* PTE tracking for evicted pages 
+ * We need to modify PTEs after pages have been written back to RMEM when using
+ * the PFA. Unfortunately, Linux removes the mappings well before actually
+ * writing the pages back. To get around this, we track the PTEs that reference
+ * a page in the pfa_epgs list below during this window.
+ *
+ * Note: There are a number of hacks here that are technically wrong:
+ *    1. Currently assumes one ptep per evicted page, but for shared pages, there could be more. We should really make ptep a linked-list.
+ *    2. ptep stores a pointer to the PTE, this could technically change under
+ *    our feet. The "right" way would be to repeat the PT walk, which would be
+ *    slow and ugly.
+ */
+#define PFA_EPG_SZ 1
+typedef struct pfa_epg {
+  struct page *pg;
+  struct vm_area_struct *vma;
+  unsigned long addr;
+  pmd_t *pmd;
+  pte_t *ptep;
+  pte_t rem_pteval;
+} pfa_epg_t;
+
+/* List of pending evicted pages that haven't been made official yet
+ * Note: there is at most one per concurrent eviction. This seems to be
+ * 1/process but it's possible with kswapd that multiple could be
+ * outstanding. */
+pfa_epg_t pfa_epgs[PFA_EPG_SZ] = {{0}};
+
+// Number of pages in the evicted page queue
+int pfa_epg_cnt = 0;
+
+/* Applies the new remote pte value to the PTEs associated with the evicted page.
+ * Invalidates PTEs immediately (really this should be batched or something...) */
+void pfa_epg_apply(struct page *pg)
+{
+  unsigned long flags;
+  pfa_epg_t *ent;
+  struct vm_area_struct *vma;
+  unsigned long addr;
+  int i;
+
+  spin_lock_irqsave(&pfa_evict_mut, flags);
+  for(i = 0; i < PFA_EPG_SZ; i++) {
+    ent = &pfa_epgs[i];
+    if(ent->pg == pg) {
+      pfa_trace("Re-writing pte for: (vaddr=0x%lx)\n",
+          ent->addr);
+
+      /* epg is applied only after the page has been completely unmapped.
+       * handle_pte_fault should be the only place that the PTE is touched
+       * again and it removes the epg entry if we get a fault on it before
+       * fully applying the epg, this should be sufficient to prevent a race
+       * (so we shouldn't need the ptl here). Note also, grabbing the ptl here
+       * can hang for unknown reasons. */
+      set_pte(ent->ptep, ent->rem_pteval);
+
+      vma = ent->vma;
+      addr = ent->addr;
+      *ent = (const pfa_epg_t){0};
+      pfa_epg_cnt--;
+      PFA_ASSERT(pfa_epg_cnt >= 0, "Popping from empty list\n");
+
+      spin_unlock_irqrestore(&pfa_evict_mut, flags);
+      flush_tlb_page(vma, addr);
+#ifdef CONFIG_PFA_DEBUG
+      void *mapped_pg = kmap_atomic(pg);
+      /* We store a copy of the page by vaddr here to ensure vaddr values
+       * match in addition to swap offsets */
+      pfa_dbg_record_page(mapped_pg, addr, NULL);
+      kunmap_atomic(mapped_pg);
+#endif
+      return;
+    }
+  }
+  // Silently ignore requests for pages not in the epg
+  spin_unlock_irqrestore(&pfa_evict_mut, flags);
+  return;
+}
+
+/* Place a page into the evicted pages list */
+void pfa_epg_add(struct page *pg, pmd_t *pmd, pte_t *ptep, pte_t rem_pteval, struct
+    vm_area_struct *vma, unsigned long addr)
+{
+  unsigned long flags;
+  int i;
+
+  spin_lock_irqsave(&pfa_evict_mut, flags);
+  for(i = 0; i < PFA_EPG_SZ; i++) {
+    if(pfa_epgs[i].pg == NULL) {
+      pfa_epgs[i].pg = pg;
+      pfa_epgs[i].ptep = ptep;
+      pfa_epgs[i].rem_pteval = rem_pteval;
+      pfa_epgs[i].vma = vma;
+      pfa_epgs[i].addr = addr;
+      pfa_epg_cnt++;
+      spin_unlock_irqrestore(&pfa_evict_mut, flags);
+      return;
+    }
+  }
+  spin_unlock_irqrestore(&pfa_evict_mut, flags);
+  PFA_ASSERT(0, "Evicted page list full!\n");
+}
+
+int pfa_epg_drop(struct page *pg) {
+  unsigned long flags;
+  int i;
+
+  spin_lock_irqsave(&pfa_evict_mut, flags);
+  for(i = 0; i < PFA_EPG_SZ; i++) {
+    if(pfa_epgs[i].pg == pg) {
+      pfa_trace("Aborting eviction by page (vaddr=0x%lx)\n",
+          pfa_epgs[i].addr);
+      pfa_epgs[i] = (const pfa_epg_t){0};
+      pfa_epg_cnt--;
+      PFA_ASSERT(pfa_epg_cnt >= 0, "Popping from empty list\n");
+      spin_unlock_irqrestore(&pfa_evict_mut, flags);
+      return 1;
+    }
+  }
+  // Silently ignore requests for pages not in the epg
+  spin_unlock_irqrestore(&pfa_evict_mut, flags);
+  return 0;
+}
+
+int pfa_epg_drop_ptep(pte_t *ptep) {
+  unsigned long flags;
+  int i;
+
+  if(ptep == NULL) {
+    return 0;
+  }
+
+  spin_lock_irqsave(&pfa_evict_mut, flags);
+  for(i = 0; i < PFA_EPG_SZ; i++) {
+    if(pfa_epgs[i].ptep == ptep) {
+      pfa_trace("Aborting eviction by ptep (vaddr=0x%lx)\n",
+          pfa_epgs[i].addr);
+      pfa_epgs[i] = (const pfa_epg_t){0};
+      pfa_epg_cnt--;
+      PFA_ASSERT(pfa_epg_cnt >= 0, "Popping from empty list\n");
+      spin_unlock_irqrestore(&pfa_evict_mut, flags);
+      return 1;
+    }
+  }
+  // Silently ignore requests for pages not in the epg
+  spin_unlock_irqrestore(&pfa_evict_mut, flags);
+  return 0;
+}
+
+int pfa_epg_get_cnt(void) {
+  return pfa_epg_cnt;
+}
 
 static inline void kpfad_inc_sleep(void)
 {
@@ -225,7 +446,18 @@ static int kpfad(void *p);
 
 void pfa_init(uint64_t memblade_mac)
 {
+#ifdef CONFIG_PFA_DEBUG
+  int i = 0;
+#endif
   printk("Linux Initializing PFA\n");
+  spin_lock_init(&pfa_evict_mut);
+
+#ifdef CONFIG_PFA_VERBOSE
+  pfa_log = vzalloc(PFA_LOG_SZ);
+  if(!pfa_log) {
+    panic("Failed to allocate pfa log\n");
+  }
+#endif
 
   /* Create sysfs interface
    * Don't fail on errors, User won't be able to use PFA, but we don't need
@@ -233,6 +465,18 @@ void pfa_init(uint64_t memblade_mac)
     if(sysfs_create_file(mm_kobj, &pfa_sysfs_tsk.attr) != 0)
           pr_err("Failed to create sysfs entries\n");
   
+#ifdef CONFIG_PFA_DEBUG
+    pfa_dbg_page_freeent = vmalloc(MEMBLADE_NPG*sizeof(dbg_page_t));
+    PFA_ASSERT(pfa_dbg_page_freeent, "Couldn't allocate pfa_dbg_page_freeent\n");
+    pfa_dbg_page_freepg = vmalloc(MEMBLADE_NPG*PAGE_SIZE);
+    PFA_ASSERT(pfa_dbg_page_freepg, "Couldn't allocate debug free page array\n");
+    for(i = 0; i < MEMBLADE_NPG; i++) {
+      dbg_page_t *ent = &(pfa_dbg_page_freeent[i]);
+      ent->pg = &(pfa_dbg_page_freepg[i*PAGE_SIZE]);
+      hlist_add_head(&(ent->_hash), &(pfa_dbg_page_free));
+    }
+#endif
+
 #ifndef CONFIG_PFA_EM
   /* Setup MMIO */
   pfa_io_free = ioremap(PFA_IO_FREEFRAME, 8);
@@ -272,14 +516,6 @@ void pfa_evict(uintptr_t rpn, phys_addr_t page_paddr)
 
   pfa_trace("Actual eviction: (rpn=0x%lx) (paddr=0x%llx)\n", rpn, page_paddr);
 
-#ifdef CONFIG_PFA_DEBUG
-  /* I'm not sure if this is possible in Linux, but free frames may end up on
-   * the lru lists and get re-selected for eviction. */
-  /* if(pfa_frameq_search(page_paddr)) { */
-  /*     panic("Evicting frame on frameq: (paddr=0x%llx)\n", page_paddr); */
-  /* } */
-#endif
-
   /* Form the packed eviction value defined in pfa spec */
   evict_val = page_paddr >> PAGE_SHIFT;
   PFA_ASSERT(evict_val >> PFA_EVICT_RPN_SHIFT == 0, "paddr component of eviction string too large\n");
@@ -301,6 +537,13 @@ static void pfa_free(struct page* pg)
   pfa_trace("Adding (paddr=0x%lx) to freelist\n", (unsigned long)page_to_phys(pg));
   pfa_write_freeq(page_to_phys(pg));
   pfa_frameq_push(pg);
+#ifdef CONFIG_PFA_EM
+  PFA_ASSERT(PQ_CNT(pfa_frameq) == PQ_CNT(pfa_freeq) + PQ_CNT(pfa_new_id),
+    "frameq invalid after pfa_free (pfa_frameq=%d, pfa_freeq=%d, pfa_newq=%d)\n",
+    PQ_CNT(pfa_frameq),
+    PQ_CNT(pfa_freeq),
+    PQ_CNT(pfa_new_id));
+#endif
 }
 
 /* Process one entry from the newq.
@@ -312,6 +555,7 @@ static void pfa_free(struct page* pg)
 static void pfa_new(int mmap_sem_tsk)
 {
   int ret;
+  int pre;
   struct mm_struct *mm;
   /* These flags are coppied from do_page_fault, I'm not 100% on them */
   unsigned int flags = FAULT_FLAG_ALLOW_RETRY | 
@@ -356,7 +600,6 @@ static void pfa_new(int mmap_sem_tsk)
    * I'm assuming swap-triggered page faults always satisfy this */
   PFA_ASSERT((vmf.vma->vm_start <= vmf.address), "Address (0x%lx) out of bounds (tsk=%d)\n", vmf.address, tskid);
 
-  /* XXX gfp_mask gets set in normal swap path but seems unused. */
   vmf.flags = flags;
   vmf.pgoff = linear_page_index(vmf.vma, vmf.address);
 
@@ -386,11 +629,23 @@ static void pfa_new(int mmap_sem_tsk)
   /* Put the swap entry back into the PTE so we can use the unmodified
    * do_swap_page 
    * NOTE: this clears _PAGE_FETCHED as well */
+  /* XXX This loses the dirty bit!!! */
   vmf.orig_pte = swp_entry_to_pte(entry);
 	set_pte_at(mm, vmf.address, vmf.pte, vmf.orig_pte);
 
+  pre = PQ_CNT(pfa_frameq);
+  vmf.flags |= FAULT_FLAG_PFA_NEW;
   ret = do_swap_page(&vmf);
+  PFA_ASSERT(PQ_CNT(pfa_frameq) == pre - 1, "do_swap_page didn't use a frame\n");
   PFA_ASSERT(!(ret & VM_FAULT_ERROR), "Failed to bookkeep page in do_swap_page() (vaddr=0x%lx, tsk=%d)\n", vmf.address, tskid);
+#ifdef CONFIG_PFA_EM
+  /* We can validate internal PFA queues in emulation mode */
+  PFA_ASSERT(PQ_CNT(pfa_frameq) == PQ_CNT(pfa_freeq) + PQ_CNT(pfa_new_id),
+    "frameq invalid after pfa_new (pfa_frameq=%d, pfa_freeq=%d, pfa_newq=%d)\n",
+    PQ_CNT(pfa_frameq),
+    PQ_CNT(pfa_freeq),
+    PQ_CNT(pfa_new_id));
+#endif
 
   if(tsk->pfa_tsk_id != mmap_sem_tsk)
     up_read(&(tsk->mm->mmap_sem));
@@ -469,16 +724,28 @@ int pfa_handle_fault(struct vm_fault *vmf)
   }
 
 #ifdef CONFIG_PFA_EM
+  PFA_ASSERT(PQ_CNT(pfa_frameq) == PQ_CNT(pfa_freeq) + PQ_CNT(pfa_new_id), "frameq invalid at page fault (pfa_frameq=%d, pfa_freeq=%d, pfa_newq=%d\n",
+      PQ_CNT(pfa_frameq),
+      PQ_CNT(pfa_freeq),
+      PQ_CNT(pfa_new_id));
+
   // If either needs attention, we service both (to match non-emulated behavior)
   if(pfa_read_freestat() == CONFIG_PFA_FREEQ_SIZE ||
      pfa_read_newstat() == CONFIG_PFA_NEWQ_SIZE) {
     pfa_trace("handling queues. freestat=%llu, newstat=%llu\n", pfa_read_freestat(), pfa_read_newstat());
     pfa_drain_newq(current->pfa_tsk_id);
-    // XXX PFA: just for debugging, delete this (only works in pfa_em mode)
-    /* PFA_ASSERT(PQ_CNT(pfa_frameq) == PQ_CNT(pfa_freeq) + PQ_CNT(pfa_new_id), "frameq invalid after drain_newq\n"); */
+    PFA_ASSERT(PQ_CNT(pfa_frameq) == PQ_CNT(pfa_freeq) + PQ_CNT(pfa_new_id),
+      "frameq invalid after drain_newq (pfa_frameq=%d, pfa_freeq=%d, pfa_newq=%d)\n",
+      PQ_CNT(pfa_frameq),
+      PQ_CNT(pfa_freeq),
+      PQ_CNT(pfa_new_id));
+
     pfa_fill_freeq();
-    // XXX PFA: just for debugging, delete this (only works in pfa_em mode)
-    /* PFA_ASSERT(PQ_CNT(pfa_frameq) == PQ_CNT(pfa_freeq) + PQ_CNT(pfa_new_id), "frameq invalid after fill_freeq\n"); */
+    PFA_ASSERT(PQ_CNT(pfa_frameq) == PQ_CNT(pfa_freeq) + PQ_CNT(pfa_new_id),
+      "frameq invalid after fill_freeq (pfa_frameq=%d, pfa_freeq=%d, pfa_newq=%d)\n",
+      PQ_CNT(pfa_frameq),
+      PQ_CNT(pfa_freeq),
+      PQ_CNT(pfa_new_id));
   }
   
   // Bring in the new page
@@ -493,6 +760,17 @@ int pfa_handle_fault(struct vm_fault *vmf)
   mb_send((uintptr_t)NULL, dst_paddr, MB_OC_PAGE_READ, rpn);
   mb_wait();
   
+#ifdef CONFIG_PFA_DEBUG
+  /* Paranoid double check against vaddr */
+  uint64_t *mapped_pg;
+  dbg_page_t *ent = pfa_dbg_get_page(vmf->address);
+  PFA_ASSERT(ent != NULL, "Couldn't find page for vaddr=0x%lx\n", vmf->address);
+  mapped_pg = kmap_atomic(phys_to_page(dst_paddr));
+  PFA_ASSERT(pg_cmp((uint64_t*)mapped_pg, (uint64_t*)(ent->pg)) == 0, "Remote and debug cached pages don't match for vaddr=0x%lx\n", vmf->address);
+  kunmap_atomic(mapped_pg);
+  pfa_dbg_free_page(ent);
+#endif
+
   // Update metadata
   pfa_push_newpgid(pgid);
   pfa_push_newvaddr(vmf->address);

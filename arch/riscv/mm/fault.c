@@ -190,6 +190,7 @@ bad_area:
 	up_read(&mm->mmap_sem);
 	/* User mode accesses just cause a SIGSEGV */
 	if (user_mode(regs)) {
+    pfa_dump_trace();
 		do_trap(regs, SIGSEGV, code, addr, tsk);
     pfa_stat_add(t_fault, pfa_stat_clock() - start_time, current);
 		return;
@@ -207,6 +208,7 @@ no_context:
 	 * terminate things with extreme prejudice.
 	 */
 	bust_spinlocks(1);
+  pfa_dump_trace();
 	pr_alert("Unable to handle kernel %s at virtual address " REG_FMT "\n",
 		(addr < PAGE_SIZE) ? "NULL pointer dereference" :
 		"paging request", addr);

@@ -2,7 +2,7 @@
 
 #ifdef CONFIG_MEMBLADE_EM
 // Size of remote memory (in terms of pages). Note that 256 pages == 1MB.
-#define MEMBLADE_NPG (256*256)
+#define MEMBLADE_NPG (512*256)
 
 // Size of remote memory in bytes
 #define MEMBLADE_SZ (MEMBLADE_NPG*PAGE_SIZE)

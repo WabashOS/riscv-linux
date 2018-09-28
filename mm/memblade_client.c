@@ -6,6 +6,7 @@
 
 // Global, pre-allocated 'remote memory' to be used in emulation mode
 uint8_t *mb_rmem;
+spinlock_t mb_mut;
 
 // Global txid (increases monotonically)
 int mb_txid = -1;
@@ -16,7 +17,8 @@ int mb_txid = -1;
 static uint8_t *mb_pg_get(uint64_t pageno)
 {
   if(pageno > MEMBLADE_NPG) {
-    pr_err("Requested invalid remote page from memblade: %lld\n", pageno);
+    /* pr_err("Requested invalid remote page from memblade: %lld\n", pageno); */
+    panic("Requested invalid remote page from memblade: %lld\n", pageno);
     return NULL;
   }
   return mb_rmem + (pageno*PAGE_SIZE);
@@ -104,6 +106,9 @@ int mb_send(
 		uintptr_t src_paddr, uintptr_t dst_paddr,
 		int opcode, uint64_t pageno)
 {
+  unsigned long irq;
+  spin_lock_irqsave(&mb_mut, irq);
+
   if(!mb_rmem) {
     pr_err("Memory blade not initialized, ignoring request\n");
     return -1;
@@ -138,6 +143,7 @@ int mb_send(
   }
 
   mb_txid++;
+  spin_unlock_irqrestore(&mb_mut, irq);
   return mb_txid;
 }
 
@@ -153,6 +159,8 @@ void mb_init(void)
   if(!mb_rmem) {
     pr_err("Memory blade emulation failed to initialize.\n");
   }
+
+  spin_lock_init(&mb_mut);
 }
 
 #else

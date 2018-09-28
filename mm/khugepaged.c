@@ -896,6 +896,7 @@ static bool __collapse_huge_page_swapin(struct mm_struct *mm,
 		if (!is_swap_pte(vmf.orig_pte))
 			continue;
 		swapped_in++;
+    PFA_ASSERT(!is_pfa_tsk(current), "Swapping from huge_page codepath!\n");
 		ret = do_swap_page(&vmf);
 
 		/* do_swap_page returns VM_FAULT_RETRY with released mmap_sem */

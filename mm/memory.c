@@ -2923,15 +2923,29 @@ int do_swap_page(struct vm_fault *vmf)
 				__swap_count(si, entry) == 1) {
 			/* skip swapcache */
 #ifdef CONFIG_PFA
-      if (is_pfa_tsk(vma_to_task(vma))) {
+      if (vmf->flags & FAULT_FLAG_PFA_NEW) {
+        /* This page is being bookkept asynchronously due to previous PFA activity
+         * Skip the page read, but do everything else. */
         page = pfa_frameq_pop();
         PFA_ASSERT(page, "Nothing returned by frameq");
+        __SetPageLocked(page);
+				__SetPageSwapBacked(page);
+				set_page_private(page, entry.val);
+				lru_cache_add_anon(page);
+        SetPageUptodate(page);
+        unlock_page(page);
       } else {
         page = alloc_page_vma(GFP_HIGHUSER_MOVABLE, vma, vmf->address);
-      }
+        if (page) {
+          __SetPageLocked(page);
+          __SetPageSwapBacked(page);
+          set_page_private(page, entry.val);
+          lru_cache_add_anon(page);
+          swap_readpage(page, true);
+        }
+			}
 #else
 			page = alloc_page_vma(GFP_HIGHUSER_MOVABLE, vma, vmf->address);
-#endif
 
 			if (page) {
 				__SetPageLocked(page);
@@ -2940,7 +2954,9 @@ int do_swap_page(struct vm_fault *vmf)
 				lru_cache_add_anon(page);
 				swap_readpage(page, true);
 			}
+#endif
 		} else {
+      PFA_ASSERT(!is_pfa_tsk(vma_to_task(vma)), "doing readahead for pfa task (sync flag = 0x%lx) (swap_count=%d)\n", si->flags & SWP_SYNCHRONOUS_IO, __swap_count(si, entry));
 			if (vma_readahead)
 				page = do_swap_page_readahead(entry,
 					GFP_HIGHUSER_MOVABLE, vmf, &swap_ra);
@@ -3014,8 +3030,10 @@ int do_swap_page(struct vm_fault *vmf)
 	 */
 	vmf->pte = pte_offset_map_lock(vma->vm_mm, vmf->pmd, vmf->address,
 			&vmf->ptl);
-	if (unlikely(!pte_same(*vmf->pte, vmf->orig_pte)))
+	if (unlikely(!pte_same(*vmf->pte, vmf->orig_pte))) {
+    PFA_ASSERT(!is_pfa_tsk(vma_to_task(vma)), "unexpected code path\n");
 		goto out_nomap;
+  }
 
 	if (unlikely(!PageUptodate(page))) {
 		ret = VM_FAULT_SIGBUS;
@@ -3972,6 +3990,32 @@ static int handle_pte_fault(struct vm_fault *vmf)
 	}
   
 #ifdef CONFIG_PFA
+  if(is_pfa_tsk(vma_to_task(vmf->vma))) {
+    /* Prevent a race with pfa_epg_apply() during eviction. After this, the pte
+     * won't change due to pfa code, even if it's in the process of being
+     * evicted. Normal kernel pte races could still exist (but will be handled
+     * normally). */
+    pfa_epg_drop_ptep(vmf->pte);
+    barrier();
+    vmf->orig_pte = *vmf->pte;
+    /* Several cases now:
+     * 1. !present -> rem OR rem -> rem
+     *   - pte_remote will handle it (retry access and PFA will do it's thing)
+     *   - rem->rem could happen if the fault was taken while it was !present
+     *     but we applied the epg before doing the walk
+     * 2. !present -> !present
+     *   - We are now racing with the eviction (somewhere between try_to_unmap_one and __remote_mapping). 
+     *   - if we find it in the swap cache (during do_swap_page below),
+     *     everything will be groovy, __remote_mapping will fail and the eviction
+     *     will be aborted
+     *   - if it get's flushed from the swap cache before we read it, then
+     *     we'll try to read it from rswap directly.
+     * 3. rem -> !present
+     *   - impossible?
+     *
+     * There might be more issues for shared pages / multiple processes
+     */
+  }
   if(pte_remote(vmf->orig_pte)) {
     return pfa_handle_fault(vmf);
   } else if (pte_fetched(vmf->orig_pte)) {

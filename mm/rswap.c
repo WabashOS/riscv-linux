@@ -99,7 +99,10 @@ static int rswap_frontswap_store(unsigned type, pgoff_t offset,
   uint64_t start;
 
 #ifdef CONFIG_PFA
-  /* PFA version has already written the page */
+  /* Strictly speaking, this isn't really needed (we could evict using rmem),
+   * however, rmem can race with the pfa to access the NIC, so it's safer to
+   * serialize these accesses through the PFA */
+  pfa_evict(pfa_swp_to_rpn(swp_entry(type, offset)), page_to_phys(page));
   return 0;
 #endif
 
@@ -121,11 +124,8 @@ static int rswap_frontswap_load(unsigned type, pgoff_t offset,
 {
   uint64_t start;
 
-#ifdef CONFIG_PFA
-  /* When using the PFA, the page data was already fetched. Do nothing here.*/
-  return 0;
-#endif
-
+  pfa_trace("frontswap_load rpn=0x%lx dest_paddr=0xlx\n",
+      pfa_swp_to_rpn(swp_entry(type,offset)), page_to_phys(page));
   start = pfa_stat_clock();
   rmem_get(page_to_phys(page), pfa_swp_to_rpn(swp_entry(type,offset)));
   pfa_stat_add(t_rmem_read, pfa_stat_clock() - start, NULL);

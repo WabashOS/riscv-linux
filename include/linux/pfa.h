@@ -7,6 +7,7 @@
 #include <linux/swapops.h>
 #include <linux/mutex.h>
 #include <linux/pfa_stat.h>
+#include <linux/hashtable.h>
 
 /* A generic in-place queue (no pointers) */
 #define DEFINE_PQ(NAME, SIZE, TYPE) typedef struct { \
@@ -38,25 +39,81 @@
 } while (0)
 
 #define PQ_CNT(Q) Q.cnt
+
 #ifdef CONFIG_PFA_DEBUG
+
+#define PFA_DEOPTIMIZE_VAR(PTR) __asm__ __volatile__("" :: "m" (PTR))
+
 /* Linux BUG_ON acts really weird (sometimes crashes in strange ways), plus it
  * doesn't print out as much info as I'd like */
 #define PFA_ASSERT(COND, MSG, ...) \
   do {  \
     if(unlikely(!(COND))) { \
+      pfa_dump_trace(); \
       panic("PFA_ASSERT %s:%d: " MSG, __FILE__, __LINE__, ##__VA_ARGS__); \
     } \
   } while(0)
 
-#else
+typedef struct dbg_page {
+  void *pg;
+  uintptr_t vaddr;
+  void *priv;
+  struct hlist_node _hash;
+} dbg_page_t;
+
+/* Add a page to the dbg_page structure.
+ * pg - the page you would like to store, a copy will be made
+ * vaddr - virtual address to use as a key
+ * priv - optional private data to store along with page.
+ */
+void pfa_dbg_record_page(void *pg, uintptr_t vaddr, void *priv);
+
+/* Read of a page (non-destructive).
+ * Returns: dbg_page_t representing the page (if found) or NULL if not found
+ */
+dbg_page_t *pfa_dbg_get_page(uintptr_t vaddr);
+
+/* Remove a page from the dbg_page structure and free it */ 
+void pfa_dbg_clear_page(dbg_page_t *ref);
+
+#else //CONFIG_PFA_DEBUG
 #define PFA_ASSERT(COND, MSG, ...) 
-#endif
+#define PFA_DEOPTIMIZE_VAR(PTR)
+#endif //CONFIG_PFA_DEBUG
 
 #ifdef CONFIG_PFA_VERBOSE
+#define PFA_LOG_SZ (256*1024*1024)
+extern uint8_t *pfa_log;
+extern size_t pfa_log_end;
+
 /* Use this for noisy messages you might want to turn off */
-#define pfa_trace(M, ...) printk(KERN_DEBUG "PFA_TRACE: " M, ##__VA_ARGS__)
+// #define pfa_trace(M, ...) printk(KERN_DEBUG "PFA_TRACE: " M, ##__VA_ARGS__)
+#define pfa_trace(M, ...) do { \
+  pfa_log_end += snprintf(pfa_log + pfa_log_end, PFA_LOG_SZ - pfa_log_end, "PFA_TRACE: " M, ##__VA_ARGS__); \
+  if(pfa_log_end > PFA_LOG_SZ) { \
+    printk("pfa_trace buffer overflow!\n"); \
+    pfa_log_end = 0; \
+  } \
+} while(0)
+
+/* This is a backup that is really slow. I don't know how to print the whole
+ * string at once (it's MBs in size and printk won't do it in one shot).
+ * You should probably use the dump_log command in gdb (it's much faster)
+ */
+static inline void pfa_dump_trace(void) {
+  int i;
+  printk("pfa_log_end: %lu\n", pfa_log_end);
+  for(i = 0; pfa_log[i] != 0; i++) {
+    printk(KERN_CONT "%c", pfa_log[i]);
+  }
+  printk("i  = %d\n", i);
+
+  memset(pfa_log, 0, pfa_log_end);
+  pfa_log_end = 0;
+}
 #else
 #define pfa_trace(M, ...)
+#define pfa_dump_trace() 
 #endif
 
 #define pfa_warn(M, ...) printk(KERN_WARNING "PFA_WARNING: " M, ##__VA_ARGS__)
@@ -175,6 +232,25 @@ static inline int __pfa_trylock(const char *file, int line, struct rw_semaphore 
     if(!rwsem_is_locked(&pfa_mutex_##LOCK)) \
       panic("pfa_assert_lock"); \
   } while(0)
+
+/* Applies the new remote pte value to the PTEs associated with the evicted page. */
+void pfa_epg_apply(struct page *pg);
+
+/* Place a page into the evicted pages list */
+void pfa_epg_add(struct page *pg, pmd_t *pmd, pte_t *ptep, pte_t rem_pteval, struct
+    vm_area_struct *vma, unsigned long addr);
+
+/* Remove page from the evicted page list without applying it.
+ * Note: Safe to call on pages not in the epg list 
+ * Returns:
+ *  1 if the page was in the epg list 
+ *  0 if the page wasn't in the epg list*/
+int pfa_epg_drop(struct page *pg);
+
+/* same as pfa_drop_epg but indexed by ptep instead of struct page */
+int pfa_epg_drop_ptep(pte_t *ptep);
+
+int pfa_epg_get_cnt(void);
 
 /* initialize the system, only call once!
  * memblade_mac - MAC address for the memory blade to use (configured only once) */

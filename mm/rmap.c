@@ -595,7 +595,6 @@ void try_to_unmap_flush(void)
 void try_to_unmap_flush_dirty(void)
 {
 	struct tlbflush_unmap_batch *tlb_ubc = &current->tlb_ubc;
-
 	if (tlb_ubc->writable)
 		try_to_unmap_flush();
 }
@@ -1342,18 +1341,16 @@ static bool try_to_unmap_one(struct page *page, struct vm_area_struct *vma,
 		.vma = vma,
 		.address = address,
 	};
-	pte_t pteval;
+	pte_t pteval, rem_pteval;
 	struct page *subpage;
 	bool ret = true;
 	unsigned long start = address, end;
 	enum ttu_flags flags = (enum ttu_flags)arg;
 #ifdef CONFIG_PFA
   struct task_struct *tsk;
-  uint64_t t_start;
 #endif
 
-  /* XXX PFA
-   * Track the last evicted vaddr, used for unit tests */
+  /* Track the last evicted vaddr, used for unit tests */
   pfa_pflat_set_vaddr(address, vma);
 
 	/* munlock has nothing to gain from examining un-locked vmas */
@@ -1507,6 +1504,9 @@ static bool try_to_unmap_one(struct page *page, struct vm_area_struct *vma,
 				(flags & (TTU_MIGRATION|TTU_SPLIT_FREEZE))) {
 			swp_entry_t entry;
 			pte_t swp_pte;
+
+      PFA_ASSERT(!is_pfa_tsk(current), "Migrating page for pfa process\n");
+
 			/*
 			 * Store the pfn of the page in a special migration
 			 * pte. do_swap_page() will wait until the migration
@@ -1585,48 +1585,38 @@ static bool try_to_unmap_one(struct page *page, struct vm_area_struct *vma,
          * chaos might ensue if that happens! */
         /* Note: we check this here to ensure that code that works on the baseline will also work with the pfa */
         if(unlikely(page_mapcount(page) > 1)) {
-          pfa_trace("Page (paddr=0x%llx) (pgid=0x%llx) shared %d times (sharing not supported in pfa)\n",
+          panic("Page (paddr=0x%llx) (pgid=0x%llx) shared %d times (sharing not supported in pfa)\n",
           page_to_phys(page), pfa_swp_to_pgid(entry, vma_to_task(vma)->pfa_tsk_id), page_mapcount(page));
         }
       }
 
 #ifdef CONFIG_PFA
       tsk = vma_to_task(vma);
-      /* We have the most info about the eviction here, even though the
-       * actual eviction happens in rswap_frontswap_store */
-      pfa_trace("Evicting page (vaddr=0x%lx) (paddr=0x%llx) (pgid=0x%llx) (tsk=%d) (pid=%d)\n",
+      pfa_trace("Preparing to evict page (vaddr=0x%lx) (paddr=0x%llx) (pgid=0x%llx) (tsk=%d) (pid=%d)\n",
       address,
       page_to_phys(page),
       pfa_swp_to_pgid(entry, tsk->pfa_tsk_id),
       tsk->pfa_tsk_id,
       task_tgid_vnr(tsk));
-
-      /* Normally, a page gets written out later (in pageout()) after we're
-       * sure that all references have been cleared and no one can dirty the
-       * page again. Unfortunately, this causes a race condition where the
-       * remote PTE is set, but there is no valid remote page. Without the PFA
-       * this gets handled in the page fault handler (the faulting process
-       * goes through the swap cache), but with the PFA the page reads bogus
-       * data from remote memory. Instead, we write the page out here to ensure a valid remote page exists before anyone could fault on it.
-       *
-       * Unfortunately, This doesn't work correctly for shared pages
-       * (the same page will be evicted multiple times in that case). It also
-       * is likely wrong for multiple threads (at least on multiple cores)
-       * because one thread with a stale TLB could theoretically write to the
-       * page before the TLB is flushed (final flush happens in shrink_page_list()). */
-      t_start = pfa_stat_clock();
-      pfa_evict(pfa_swp_to_rpn(entry), page_to_phys(page));
-      pfa_stat_add(t_rmem_write, pfa_stat_clock() - t_start, tsk);
+      rem_pteval = pteval;
 
       /* Rocket doesn't set these in HW, it causes traps instead. By setting
-       * these pre-emptively, we avoid those traps */
-      pteval = pte_mkdirty(pteval);
-      pteval = pte_mkyoung(pteval);
+       * these pre-emptively, we avoid those traps.
+       * XXX PFA todo: check if this is Spike only, or if it happens on FireSim.
+       * */
+      rem_pteval = pte_mkdirty(rem_pteval);
+      rem_pteval = pte_mkyoung(rem_pteval);
 
       /* The pgprot matches the evicted page. */
-      pteval = pfa_mk_remote_pte(entry, __pgprot(pte_val(pteval) & 0x3FF),
+      rem_pteval = pfa_mk_remote_pte(entry, __pgprot(pte_val(rem_pteval) & 0x3FF),
           vma_to_task(vma)->pfa_tsk_id);
-      set_pte_at(mm, address, pvmw.pte, pteval);
+      pfa_epg_add(page, pvmw.pmd, pvmw.pte, rem_pteval, vma, address);
+
+      /* Note we're setting the PTE to the standard linux evicted pteval, not
+       * the remote rem_pteval we constructed above, the remote value will be
+       * applied later (during pageout()). In the meantime, the linux swapcache
+       * will deal with things. */
+      set_pte_at(mm, address, pvmw.pte, swp_pte);
 #else
       set_pte_at(mm, address, pvmw.pte, swp_pte);
 #endif

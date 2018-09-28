@@ -49,6 +49,7 @@
 #include <linux/prefetch.h>
 #include <linux/printk.h>
 #include <linux/dax.h>
+#include <linux/pfa.h>
 
 #include <asm/tlbflush.h>
 #include <asm/div64.h>
@@ -718,6 +719,11 @@ static int __remove_mapping(struct address_space *mapping, struct page *page,
 		__delete_from_swap_cache(page);
 		spin_unlock_irqrestore(&mapping->tree_lock, flags);
 		put_swap_page(page, swap);
+#ifdef CONFIG_PFA
+    /* Now that pages can't be found in the swapcache, it's safe to convert
+     * their PTEs to remote */
+    pfa_epg_apply(page);
+#endif
 	} else {
 		void (*freepage)(struct page *);
 		void *shadow = NULL;
@@ -981,6 +987,9 @@ static unsigned long shrink_page_list(struct list_head *page_list,
 		int may_enter_fs;
 		enum page_references references = PAGEREF_RECLAIM_CLEAN;
 		bool dirty, writeback;
+
+    PFA_ASSERT(pfa_epg_get_cnt() == 0,
+        "Evicted page queue not empty after shrink_page_list iteration: cnt=%d\n", pfa_epg_get_cnt());
 
 		cond_resched();
 
@@ -1345,6 +1354,11 @@ keep_locked:
 keep:
 		list_add(&page->lru, &ret_pages);
 		VM_BUG_ON_PAGE(PageLRU(page) || PageUnevictable(page), page);
+#ifdef CONFIG_PFA
+    //We decided not to evict this page after all. Note: It's safe to call this
+    //on pages that weren't unmapped, or weren't PFA-related
+    pfa_epg_drop(page);
+#endif
 	}
 
 	mem_cgroup_uncharge_list(&free_pages);
