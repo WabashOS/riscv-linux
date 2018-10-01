@@ -97,18 +97,18 @@ static int rswap_frontswap_store(unsigned type, pgoff_t offset,
         struct page *page)
 {
   uint64_t start;
+  start = pfa_stat_clock();
 
 #ifdef CONFIG_PFA
   /* Strictly speaking, this isn't really needed (we could evict using rmem),
    * however, rmem can race with the pfa to access the NIC, so it's safer to
    * serialize these accesses through the PFA */
   pfa_evict(pfa_swp_to_rpn(swp_entry(type, offset)), page_to_phys(page));
-  return 0;
+#else
+  /* Default is to use memblade */
+  rmem_put(page_to_phys(page), pfa_swp_to_rpn(swp_entry(type, offset)));
 #endif
 
-  /* Default is to use memblade */
-  start = pfa_stat_clock();
-  rmem_put(page_to_phys(page), pfa_swp_to_rpn(swp_entry(type, offset)));
   pfa_stat_add(t_rmem_write, pfa_stat_clock() - start, NULL);
 	return 0;
 }

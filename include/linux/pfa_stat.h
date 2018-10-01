@@ -27,7 +27,9 @@ typedef struct pfa_stat {
   atomic64_t t_fault;
 
   /* Total number of page faults due to swapped-out pages (same as major plus
-   * minor faults). Should be 0 when PFA enabled. */
+   * minor faults). Should be close to 0 when PFA enabled (a few normal
+   * swap-faults can occur if the process references a page while it's being
+   * evicted). */
   atomic64_t n_swapfault;
 
   /* Total number of faults due to full queues */

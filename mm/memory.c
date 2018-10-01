@@ -4021,15 +4021,15 @@ static int handle_pte_fault(struct vm_fault *vmf)
   } else if (pte_fetched(vmf->orig_pte)) {
     /* This page hasn't been bookkeeped yet, process it before doing rest of
      * fault handling */
-    pfa_lock(global);
     if(!is_pfa_tsk(vma_to_task(vmf->vma))) {
       panic("Seeing fetched page for non-pfa task.");
     } else {
       pfa_stat_add(n_early_newq, 1, current);
+      pfa_lock(global);
       pfa_drain_newq(current->pfa_tsk_id);
       vmf->orig_pte = *vmf->pte;
+      pfa_unlock(global);
     }
-    pfa_unlock(global);
   }
 #endif
 
@@ -4037,8 +4037,8 @@ static int handle_pte_fault(struct vm_fault *vmf)
     int ret;
     uint64_t start = pfa_stat_clock();
 		ret = do_swap_page(vmf);
-    pfa_stat_add(t_bookkeeping, pfa_stat_clock() - start, current);
-    pfa_stat_add(n_swapfault, 1, current);
+    pfa_stat_add(t_bookkeeping, pfa_stat_clock() - start, vma_to_task(vmf->vma));
+    pfa_stat_add(n_swapfault, 1, vma_to_task(vmf->vma));
     return ret;
   }
 

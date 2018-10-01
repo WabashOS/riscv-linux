@@ -1578,17 +1578,14 @@ static bool try_to_unmap_one(struct page *page, struct vm_area_struct *vma,
 			if (pte_soft_dirty(pteval))
 				swp_pte = pte_swp_mksoft_dirty(swp_pte);
 
-      if(vma_to_task(vma) == pfa_stat_tsk || is_pfa_tsk(vma_to_task(vma))) {
-        pfa_stat_add(n_evicted, 1, vma_to_task(vma));
 
-        /* The PFA will get right-screwy if we evict shared pages. Who knows what
-         * chaos might ensue if that happens! */
-        /* Note: we check this here to ensure that code that works on the baseline will also work with the pfa */
-        if(unlikely(page_mapcount(page) > 1)) {
-          panic("Page (paddr=0x%llx) (pgid=0x%llx) shared %d times (sharing not supported in pfa)\n",
-          page_to_phys(page), pfa_swp_to_pgid(entry, vma_to_task(vma)->pfa_tsk_id), page_mapcount(page));
-        }
-      }
+      /* The PFA will get right-screwy if we evict shared pages. Who knows what
+       * chaos might ensue if that happens! */
+      /* Note: checked out here to collect stats, even in baseline mode */
+      PFA_ASSERT(!is_pfa_tsk(vma_to_task(vma)) || page_mapcount(page) <= 1,
+            "Page (paddr=0x%llx) (pgid=0x%llx) shared %d times (sharing not supported in pfa)\n",
+        page_to_phys(page), pfa_swp_to_pgid(entry, vma_to_task(vma)->pfa_tsk_id), page_mapcount(page));
+      pfa_stat_add(n_evicted, 1, vma_to_task(vma));
 
 #ifdef CONFIG_PFA
       tsk = vma_to_task(vma);

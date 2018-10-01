@@ -295,6 +295,7 @@ vmalloc_fault:
 		pte_k = pte_offset_kernel(pmd_k, addr);
 		if (!pte_present(*pte_k))
 			goto no_context;
+
     pfa_stat_add(t_fault, pfa_stat_clock() - start_time, current);
 		return;
 	}

@@ -512,7 +512,6 @@ static void pfa_evict_poll(void)
 void pfa_evict(uintptr_t rpn, phys_addr_t page_paddr)
 {
   uint64_t evict_val;
-  uint64_t start;
 
   pfa_trace("Actual eviction: (rpn=0x%lx) (paddr=0x%llx)\n", rpn, page_paddr);
 
@@ -521,7 +520,6 @@ void pfa_evict(uintptr_t rpn, phys_addr_t page_paddr)
   PFA_ASSERT(evict_val >> PFA_EVICT_RPN_SHIFT == 0, "paddr component of eviction string too large\n");
   evict_val |= rpn << PFA_EVICT_RPN_SHIFT;
 
-  start = pfa_stat_clock();
   
   /* I'm 99% sure we don't need to lock here because these steps are all atomic and
    * we don't touch other global PFA datastructures. */
@@ -569,8 +567,8 @@ static void pfa_new(int mmap_sem_tsk)
 
   pgd_t *pgd;
   p4d_t *p4d;
-
-  uint64_t cycles = pfa_stat_clock();
+  
+  uint64_t start = pfa_stat_clock();
 
 #ifdef CONFIG_PFA_DEBUG
   PFA_ASSERT(pfa_read_newstat() != 0, "Trying to pop empty newq\n");
@@ -650,7 +648,7 @@ static void pfa_new(int mmap_sem_tsk)
   if(tsk->pfa_tsk_id != mmap_sem_tsk)
     up_read(&(tsk->mm->mmap_sem));
 
-  pfa_stat_add(t_bookkeeping, pfa_stat_clock() - cycles, tsk);
+  pfa_stat_add(t_bookkeeping, pfa_stat_clock() - start, tsk);
 
   return;
 }
@@ -670,7 +668,6 @@ void pfa_drain_newq(int mmap_sem_tsk)
     pfa_new(mmap_sem_tsk); 
     nnew--;
   }
-
 }
 
 void pfa_fill_freeq(void)
@@ -901,7 +898,7 @@ static int kpfad(void *p)
     usleep_range(kpfad_sleeptime, kpfad_sleeptime + KPFAD_SLEEP_SLACK);
   }
 
-  pfa_trace("kpfad exiting\n");
+  printk("kpfad exiting\n");
   return 0;
 }
 #endif
