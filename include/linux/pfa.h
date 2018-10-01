@@ -82,12 +82,13 @@ void pfa_dbg_clear_page(dbg_page_t *ref);
 #endif //CONFIG_PFA_DEBUG
 
 #ifdef CONFIG_PFA_VERBOSE
-#define PFA_LOG_SZ (256*1024*1024)
-extern uint8_t *pfa_log;
-extern size_t pfa_log_end;
+// #define PFA_LOG_SZ (256*1024*1024)
+// extern uint8_t *pfa_log;
+// extern size_t pfa_log_end;
 
 /* Use this for noisy messages you might want to turn off */
-// #define pfa_trace(M, ...) printk(KERN_DEBUG "PFA_TRACE: " M, ##__VA_ARGS__)
+#define pfa_trace(M, ...) printk(KERN_DEBUG "PFA_TRACE: " M, ##__VA_ARGS__)
+/*
 #define pfa_trace(M, ...) do { \
   pfa_log_end += snprintf(pfa_log + pfa_log_end, PFA_LOG_SZ - pfa_log_end, "PFA_TRACE: " M, ##__VA_ARGS__); \
   if(pfa_log_end > PFA_LOG_SZ) { \
@@ -95,26 +96,28 @@ extern size_t pfa_log_end;
     pfa_log_end = 0; \
   } \
 } while(0)
+*/
 
 /* This is a backup that is really slow. I don't know how to print the whole
  * string at once (it's MBs in size and printk won't do it in one shot).
  * You should probably use the dump_log command in gdb (it's much faster)
  */
-static inline void pfa_dump_trace(void) {
-  int i;
-  printk("pfa_log_end: %lu\n", pfa_log_end);
-  for(i = 0; pfa_log[i] != 0; i++) {
-    printk(KERN_CONT "%c", pfa_log[i]);
-  }
-  printk("i  = %d\n", i);
-
-  memset(pfa_log, 0, pfa_log_end);
-  pfa_log_end = 0;
-}
+#define pfa_dump_trace() 
+// static inline void pfa_dump_trace(void) {
+//   int i;
+//   printk("pfa_log_end: %lu\n", pfa_log_end);
+//   for(i = 0; pfa_log[i] != 0 && i < pfa_log_end; i++) {
+//     printk(KERN_CONT "%c", pfa_log[i]);
+//   }
+//   printk("i  = %d\n", i);
+//
+//   memset(pfa_log, 0, pfa_log_end);
+//   pfa_log_end = 0;
+// }
 #else
 #define pfa_trace(M, ...)
 #define pfa_dump_trace() 
-#endif
+#endif //CONFIG_PFA_VERBOSE
 
 #define pfa_warn(M, ...) printk(KERN_WARNING "PFA_WARNING: " M, ##__VA_ARGS__)
 // #define pfa_warn(M, ...) 

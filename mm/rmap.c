@@ -1341,12 +1341,13 @@ static bool try_to_unmap_one(struct page *page, struct vm_area_struct *vma,
 		.vma = vma,
 		.address = address,
 	};
-	pte_t pteval, rem_pteval;
+	pte_t pteval;
 	struct page *subpage;
 	bool ret = true;
 	unsigned long start = address, end;
 	enum ttu_flags flags = (enum ttu_flags)arg;
 #ifdef CONFIG_PFA
+  pte_t rem_pteval;
   struct task_struct *tsk;
 #endif
 
