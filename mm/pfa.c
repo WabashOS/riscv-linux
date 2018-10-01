@@ -741,6 +741,9 @@ int pfa_handle_fault(struct vm_fault *vmf)
   if(pfa_read_freestat() == CONFIG_PFA_FREEQ_SIZE ||
      pfa_read_newstat() == CONFIG_PFA_NEWQ_SIZE) {
     pfa_trace("handling queues. freestat=%llu, newstat=%llu\n", pfa_read_freestat(), pfa_read_newstat());
+
+    /* Note: the order matters here. If you fill the freeq before draining
+     * the newq, the frameq could overflow */
     pfa_drain_newq(current->pfa_tsk_id);
     PFA_ASSERT(PQ_CNT(pfa_frameq) == PQ_CNT(pfa_freeq) + PQ_CNT(pfa_new_id),
       "frameq invalid after drain_newq (pfa_frameq=%d, pfa_freeq=%d, pfa_newq=%d)\n",
@@ -790,8 +793,10 @@ int pfa_handle_fault(struct vm_fault *vmf)
 #else //CONFIG_PFA_EM
   /* We should only see a fault with the PFA enabled if the queues need draining */
   /* It's OK to call these even if their queues don't need processing */
-  pfa_fill_freeq();
+  /* Note: the order matters here. If you fill the freeq before draining
+   * the newq, the frameq could overflow */
   pfa_drain_newq(current->pfa_tsk_id);
+  pfa_fill_freeq();
 #endif //CONFIG_PFA_EM
 
 #ifdef CONFIG_PFA_KPFAD
@@ -811,6 +816,8 @@ void pfa_frameq_push(struct page *frame)
 {
   pfa_assert_lock(global);
 
+  //XXX PFA
+  pfa_trace("Frameq push: %d\n", PQ_CNT(pfa_frameq));
   PQ_PUSH(pfa_frameq, frame);
   return;
 }
@@ -820,6 +827,8 @@ struct page* pfa_frameq_pop(void)
   struct page *ret;
 
   pfa_assert_lock(global);
+  //XXX PFA
+  pfa_trace("Frameq pop: %d\n", PQ_CNT(pfa_frameq));
   PQ_POP(pfa_frameq, ret);
 
   return ret;
@@ -894,8 +903,10 @@ static int kpfad(void *p)
     /* NOTE: Lock acquisition order matters here */
     /* Not a big deal if we can't get the pfa_lock, just try again later */
     if(pfa_trylock(global)) {
-      pfa_fill_freeq();
+      /* Note: the order matters here. If you fill the freeq before draining
+       * the newq, the frameq could overflow */
       pfa_drain_newq(-1);
+      pfa_fill_freeq();
 
       /* Calculate next sleep time */
       kpfad_inc_sleep();

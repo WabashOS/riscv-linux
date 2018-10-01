@@ -87,7 +87,7 @@ void pfa_dbg_clear_page(dbg_page_t *ref);
 // extern size_t pfa_log_end;
 
 /* Use this for noisy messages you might want to turn off */
-#define pfa_trace(M, ...) printk(KERN_DEBUG "PFA_TRACE: " M, ##__VA_ARGS__)
+#define pfa_trace(M, ...) printk("PFA_TRACE: " M, ##__VA_ARGS__)
 /*
 #define pfa_trace(M, ...) do { \
   pfa_log_end += snprintf(pfa_log + pfa_log_end, PFA_LOG_SZ - pfa_log_end, "PFA_TRACE: " M, ##__VA_ARGS__); \

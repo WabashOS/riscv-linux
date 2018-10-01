@@ -2944,7 +2944,7 @@ int do_swap_page(struct vm_fault *vmf)
           swap_readpage(page, true);
         }
 			}
-#else
+#else //CONFIG_PFA
 			page = alloc_page_vma(GFP_HIGHUSER_MOVABLE, vma, vmf->address);
 
 			if (page) {
@@ -2954,7 +2954,7 @@ int do_swap_page(struct vm_fault *vmf)
 				lru_cache_add_anon(page);
 				swap_readpage(page, true);
 			}
-#endif
+#endif //CONFIG_PFA
 		} else {
       PFA_ASSERT(!is_pfa_tsk(vma_to_task(vma)), "doing readahead for pfa task (sync flag = 0x%lx) (swap_count=%d)\n", si->flags & SWP_SYNCHRONOUS_IO, __swap_count(si, entry));
 			if (vma_readahead)
@@ -4031,7 +4031,7 @@ static int handle_pte_fault(struct vm_fault *vmf)
       pfa_unlock(global);
     }
   }
-#endif
+#endif //CONFIG_PFA
 
 	if (!pte_present(vmf->orig_pte)) {
     int ret;
