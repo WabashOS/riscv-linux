@@ -11,6 +11,12 @@
 #include <linux/memblade_client.h>
 #include "internal.h"
 
+#ifdef CONFIG_PFA_VERBOSE
+/* Deferred pfa logging */
+uint8_t *pfa_log;
+size_t pfa_log_end = 0;
+#endif
+
 #ifdef CONFIG_PFA
 
 /* Phyiscal addr for MMIO to pfa (see the PFA spec for details) */
@@ -37,10 +43,6 @@ struct kobj_attribute pfa_sysfs_tsk = __ATTR(pfa_tsk, 0660, pfa_sysfs_show_tsk, 
 
 /* Global var. See pfa.h for details */
 struct task_struct *pfa_tsk[PFA_MAX_TASKS];
-
-/* Deferred pfa logging */
-uint8_t *pfa_log;
-size_t pfa_log_end = 0;
 
 #ifdef CONFIG_PFA_EM
 
@@ -194,6 +196,10 @@ void pfa_epg_apply(struct page *pg)
   unsigned long addr;
   int i;
 
+#ifdef CONFIG_PFA_DEBUG
+  void *mapped_pg;
+#endif
+
   spin_lock_irqsave(&pfa_evict_mut, flags);
   for(i = 0; i < PFA_EPG_SZ; i++) {
     ent = &pfa_epgs[i];
@@ -218,7 +224,7 @@ void pfa_epg_apply(struct page *pg)
       spin_unlock_irqrestore(&pfa_evict_mut, flags);
       flush_tlb_page(vma, addr);
 #ifdef CONFIG_PFA_DEBUG
-      void *mapped_pg = kmap_atomic(pg);
+      mapped_pg = kmap_atomic(pg);
       /* We store a copy of the page by vaddr here to ensure vaddr values
        * match in addition to swap offsets */
       pfa_dbg_record_page(mapped_pg, addr, NULL);
@@ -453,10 +459,10 @@ void pfa_init(uint64_t memblade_mac)
   spin_lock_init(&pfa_evict_mut);
 
 #ifdef CONFIG_PFA_VERBOSE
-  pfa_log = vzalloc(PFA_LOG_SZ);
-  if(!pfa_log) {
-    panic("Failed to allocate pfa log\n");
-  }
+  /* pfa_log = vzalloc(PFA_LOG_SZ); */
+  /* if(!pfa_log) { */
+  /*   panic("Failed to allocate pfa log\n"); */
+  /* } */
 #endif
 
   /* Create sysfs interface
@@ -709,6 +715,11 @@ int pfa_handle_fault(struct vm_fault *vmf)
   pte_t lpte;
 #endif
 
+#if defined(CONFIG_PFA_DEBUG) && defined(CONFIG_PFA_EM)
+  uint64_t *mapped_pg;
+  dbg_page_t *ent;
+#endif
+
   pfa_trace("Page fault received on remote page (vaddr=0x%lx) (tsk=%d) (pte=0x%lx)\n",
       vmf->address & PAGE_MASK,
       current->pfa_tsk_id,
@@ -762,8 +773,7 @@ int pfa_handle_fault(struct vm_fault *vmf)
   
 #ifdef CONFIG_PFA_DEBUG
   /* Paranoid double check against vaddr */
-  uint64_t *mapped_pg;
-  dbg_page_t *ent = pfa_dbg_get_page(vmf->address);
+  ent = pfa_dbg_get_page(vmf->address);
   PFA_ASSERT(ent != NULL, "Couldn't find page for vaddr=0x%lx\n", vmf->address);
   mapped_pg = kmap_atomic(phys_to_page(dst_paddr));
   PFA_ASSERT(pg_cmp((uint64_t*)mapped_pg, (uint64_t*)(ent->pg)) == 0, "Remote and debug cached pages don't match for vaddr=0x%lx\n", vmf->address);
@@ -780,12 +790,12 @@ int pfa_handle_fault(struct vm_fault *vmf)
   set_pte_at(vmf->vma->vm_mm, vmf->address, vmf->pte, lpte);
   vmf->orig_pte = lpte;
 
-#else
+#else //CONFIG_PFA_EM
   /* We should only see a fault with the PFA enabled if the queues need draining */
   /* It's OK to call these even if their queues don't need processing */
   pfa_fill_freeq();
   pfa_drain_newq(current->pfa_tsk_id);
-#endif
+#endif //CONFIG_PFA_EM
 
 #ifdef CONFIG_PFA_KPFAD
   kpfad_dec_sleep();

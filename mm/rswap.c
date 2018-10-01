@@ -124,7 +124,7 @@ static int rswap_frontswap_load(unsigned type, pgoff_t offset,
 {
   uint64_t start;
 
-  pfa_trace("frontswap_load rpn=0x%lx dest_paddr=0xlx\n",
+  pfa_trace("frontswap_load rpn=0x%llx dest_paddr=0x%llx\n",
       pfa_swp_to_rpn(swp_entry(type,offset)), page_to_phys(page));
   start = pfa_stat_clock();
   rmem_get(page_to_phys(page), pfa_swp_to_rpn(swp_entry(type,offset)));

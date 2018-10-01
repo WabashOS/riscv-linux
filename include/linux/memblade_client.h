@@ -1,12 +1,12 @@
 #include <linux/types.h>
 
-#ifdef CONFIG_MEMBLADE_EM
 // Size of remote memory (in terms of pages). Note that 256 pages == 1MB.
+// Note this defines the size in emulation mode, but may still be used in
+// non-emulation mode (in which it acts as an upper bound on rmem usage)
 #define MEMBLADE_NPG (512*256)
 
 // Size of remote memory in bytes
 #define MEMBLADE_SZ (MEMBLADE_NPG*PAGE_SIZE)
-#endif
 
 // Opcodes
 #define MB_OC_PAGE_READ 0

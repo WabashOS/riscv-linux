@@ -988,8 +988,10 @@ static unsigned long shrink_page_list(struct list_head *page_list,
 		enum page_references references = PAGEREF_RECLAIM_CLEAN;
 		bool dirty, writeback;
 
+#ifdef CONFIG_PFA_EM
     PFA_ASSERT(pfa_epg_get_cnt() == 0,
         "Evicted page queue not empty after shrink_page_list iteration: cnt=%d\n", pfa_epg_get_cnt());
+#endif
 
 		cond_resched();
 
