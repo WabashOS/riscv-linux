@@ -91,7 +91,8 @@ size_t kpfad_sleeptime = 10000; /* how long to sleep (in us)*/
 #define KPFAD_SLEEP_DEC 1000
 #define KPFAD_SLEEP_INC 100
 
-#ifdef CONFIG_PFA_DEBUG
+/* #ifdef CONFIG_PFA_DEBUG */
+#if defined(CONFIG_PFA_DEBUG) && defined(CONFIG_PFA_EM)
 static int pg_cmp(uint64_t *p1, uint64_t *p2)
 {
   int i;
@@ -153,7 +154,7 @@ void pfa_dbg_free_page(dbg_page_t *ent)
   spin_unlock_irqrestore(&pfa_dbg_page_lock, flags);
 }
 
-#endif
+#endif //defined CONFIG_PFA_DEBUG && CONFIG_PFA_EM
 
 /* PTE tracking for evicted pages 
  * We need to modify PTEs after pages have been written back to RMEM when using
@@ -223,7 +224,8 @@ void pfa_epg_apply(struct page *pg)
 
       spin_unlock_irqrestore(&pfa_evict_mut, flags);
       flush_tlb_page(vma, addr);
-#ifdef CONFIG_PFA_DEBUG
+/* #ifdef CONFIG_PFA_DEBUG */
+#if defined(CONFIG_PFA_DEBUG) && defined(CONFIG_PFA_EM)
       mapped_pg = kmap_atomic(pg);
       /* We store a copy of the page by vaddr here to ensure vaddr values
        * match in addition to swap offsets */
@@ -471,7 +473,8 @@ void pfa_init(uint64_t memblade_mac)
     if(sysfs_create_file(mm_kobj, &pfa_sysfs_tsk.attr) != 0)
           pr_err("Failed to create sysfs entries\n");
   
-#ifdef CONFIG_PFA_DEBUG
+/* #ifdef CONFIG_PFA_DEBUG */
+#if defined(CONFIG_PFA_DEBUG) && defined(CONFIG_PFA_EM)
     pfa_dbg_page_freeent = vmalloc(MEMBLADE_NPG*sizeof(dbg_page_t));
     PFA_ASSERT(pfa_dbg_page_freeent, "Couldn't allocate pfa_dbg_page_freeent\n");
     pfa_dbg_page_freepg = vmalloc(MEMBLADE_NPG*PAGE_SIZE);
@@ -771,7 +774,8 @@ int pfa_handle_fault(struct vm_fault *vmf)
   mb_send((uintptr_t)NULL, dst_paddr, MB_OC_PAGE_READ, rpn);
   mb_wait();
   
-#ifdef CONFIG_PFA_DEBUG
+/* #ifdef CONFIG_PFA_DEBUG */
+#if defined(CONFIG_PFA_DEBUG) && defined(CONFIG_PFA_EM)
   /* Paranoid double check against vaddr */
   ent = pfa_dbg_get_page(vmf->address);
   PFA_ASSERT(ent != NULL, "Couldn't find page for vaddr=0x%lx\n", vmf->address);
@@ -816,8 +820,6 @@ void pfa_frameq_push(struct page *frame)
 {
   pfa_assert_lock(global);
 
-  //XXX PFA
-  pfa_trace("Frameq push: %d\n", PQ_CNT(pfa_frameq));
   PQ_PUSH(pfa_frameq, frame);
   return;
 }
@@ -827,8 +829,6 @@ struct page* pfa_frameq_pop(void)
   struct page *ret;
 
   pfa_assert_lock(global);
-  //XXX PFA
-  pfa_trace("Frameq pop: %d\n", PQ_CNT(pfa_frameq));
   PQ_POP(pfa_frameq, ret);
 
   return ret;
@@ -878,6 +878,19 @@ void pfa_clear_tsk(int tsk_id)
   pfa_drain_newq(-1);
   pfa_tsk[tsk_id]->pfa_tsk_id = -1;
   pfa_tsk[tsk_id] = NULL;
+
+/* #ifdef CONFIG_PFA_DEBUG */
+#if defined(CONFIG_PFA_DEBUG) && defined(CONFIG_PFA_EM)
+  // Empty the debug hashtable
+  int bkt;
+  struct hlist_node *tmp;
+  dbg_page_t *ent;
+  /* hash_for_each_safe(ent, tmp, pfa_dbg_page, _hash) { */
+  hash_for_each_safe(pfa_dbg_page, bkt, tmp, ent, _hash) {
+    hash_del(&(ent->_hash));
+    hlist_add_head(&(ent->_hash), &(pfa_dbg_page_free));
+  }
+#endif
 
   pfa_trace("Done deregistering %d\n", tsk_id);
   pfa_unlock(global);
