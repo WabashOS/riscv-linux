@@ -2,6 +2,9 @@
 #include <linux/io.h>
 #include <linux/highmem.h>
 
+// XXX PFA - this is kinda janky because it's declared in pfa.h which we can't include here due to circular dependency...
+extern spinlock_t pfa_hw_mut;
+
 #ifdef CONFIG_MEMBLADE_EM
 
 // Global, pre-allocated 'remote memory' to be used in emulation mode
@@ -180,6 +183,10 @@ int mb_send(
 		uintptr_t src_paddr, uintptr_t dst_paddr,
 		int opcode, uint64_t pageno)
 {
+  int res;
+  unsigned long flags;
+  spin_lock_irqsave(&pfa_hw_mut, flags);
+
 	writeq(src_paddr, mb_io_src);
   writeq(dst_paddr, mb_io_dst);
   writeq(mb_dstmac, mb_io_mac);
@@ -187,14 +194,23 @@ int mb_send(
   writeq(pageno, mb_io_pgno);
 
 	while (readl(mb_io_nreq) == 0) {}
-	/* asm volatile ("fence"); */
-	return readl(mb_io_req);
+	asm volatile ("fence");
+	res = readl(mb_io_req);
+  spin_unlock_irqrestore(&pfa_hw_mut, flags);
+  return res;
 }
 
 int mb_wait()
 {
+  int res;
+  unsigned long flags;
+  spin_lock_irqsave(&pfa_hw_mut, flags);
+
   while (readl(mb_io_nresp) == 0) {}
-  return readl(mb_io_resp);
+	asm volatile ("fence");
+  res = readl(mb_io_resp);
+  spin_unlock_irqrestore(&pfa_hw_mut, flags);
+  return res;
 }
 
 void mb_init(void)

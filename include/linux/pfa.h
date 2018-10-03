@@ -200,8 +200,8 @@ static inline int pfa_pgid_to_tsk(pfa_pgid_t pgid)
  * NOTE: Often held with mm->mmap_sem. To avoid deadlock, If you need mmap_sem,
  * always down it before locking pfa_mutex. */
 extern struct rw_semaphore pfa_mutex_global;
-/* Only protects the evictq (and subsequent polling for completion) */
-extern struct rw_semaphore pfa_mutex_evict;
+
+extern spinlock_t pfa_hw_mut;
 
 /* Macros here mostly to make it easier to track locking behavior */
 // #define pfa_trace_locks(M, ...) printk("PFA_TRACE_LOCKS: " M, ##__VA_ARGS__)

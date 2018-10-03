@@ -33,6 +33,9 @@ size_t pfa_log_end = 0;
 DECLARE_RWSEM(pfa_mutex_global);
 spinlock_t pfa_evict_mut;
 
+/* Protects only direct access to HW queues */
+DEFINE_SPINLOCK(pfa_hw_mut);
+
 /* sysfs stuff */
 ssize_t pfa_sysfs_show_tsk(struct kobject *kobj,
     struct kobj_attribute *attr, char *buf);
@@ -400,42 +403,76 @@ static void pfa_write_dstmac(uint64_t dstmac)
 #else
 static void pfa_write_freeq(uintptr_t frame_paddr)
 {
+  unsigned long flags;
+  spin_lock_irqsave(&pfa_hw_mut, flags);
   writeq(frame_paddr, pfa_io_free);
+  spin_unlock_irqrestore(&pfa_hw_mut, flags);
 }
 
 static uint64_t pfa_read_freestat(void)
 {
-  return readq(pfa_io_freestat);
+  uint64_t res;
+  unsigned long flags;
+  spin_lock_irqsave(&pfa_hw_mut, flags);
+  res = readq(pfa_io_freestat);
+  spin_unlock_irqrestore(&pfa_hw_mut, flags);
+  return res;
 }
 
 static void pfa_write_evictq(uint64_t ev)
 {
+  unsigned long flags;
+  spin_lock_irqsave(&pfa_hw_mut, flags);
   writeq(ev, pfa_io_evict);
+  spin_unlock_irqrestore(&pfa_hw_mut, flags);
 }
 
 static uint64_t pfa_read_evictstat(void)
 {
-  return readq(pfa_io_evictstat);
+  uint64_t res;
+  unsigned long flags;
+  spin_lock_irqsave(&pfa_hw_mut, flags);
+  res = readq(pfa_io_evictstat);
+  spin_unlock_irqrestore(&pfa_hw_mut, flags);
+  return res;
 }
 
 static pfa_pgid_t pfa_read_newpgid(void)
 {
-  return (pfa_pgid_t)readq(pfa_io_newpgid);
+  pfa_pgid_t res;
+  unsigned long flags;
+  spin_lock_irqsave(&pfa_hw_mut, flags);
+  res = (pfa_pgid_t)readq(pfa_io_newpgid);
+  spin_unlock_irqrestore(&pfa_hw_mut, flags);
+  return res;
 }
  
 static uintptr_t pfa_read_newvaddr(void)
 {
-  return readq(pfa_io_newvaddr);
+  uintptr_t res;
+  unsigned long flags;
+  spin_lock_irqsave(&pfa_hw_mut, flags);
+  res = readq(pfa_io_newvaddr);
+  spin_unlock_irqrestore(&pfa_hw_mut, flags);
+  return res;
 }
   
 static uint64_t pfa_read_newstat(void)
 {
-  return readq(pfa_io_newstat);
+  uint64_t res;
+  unsigned long flags;
+  spin_lock_irqsave(&pfa_hw_mut, flags);
+  res = readq(pfa_io_newstat);
+  spin_unlock_irqrestore(&pfa_hw_mut, flags);
+  return res;
 }
 
 static void pfa_write_dstmac(uint64_t dstmac)
 {
+  unsigned long flags;
+  spin_lock_irqsave(&pfa_hw_mut, flags);
   writeq(dstmac, pfa_io_dstmac);
+  spin_unlock_irqrestore(&pfa_hw_mut, flags);
 }
 #endif
 
