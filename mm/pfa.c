@@ -642,6 +642,10 @@ static void pfa_new(int mmap_sem_tsk)
 
   pre = PQ_CNT(pfa_frameq);
   vmf.flags |= FAULT_FLAG_PFA_NEW;
+  //XXX PFA we treat every access as a "write" in order to preemptively dirty all
+  //pages. This is not optimal (potentially many more evictions), but it avoids the chance
+  //that a page was dirtied before we could bookkeep it
+  vmf.flags |= FAULT_FLAG_WRITE;
   ret = do_swap_page(&vmf);
   PFA_ASSERT(PQ_CNT(pfa_frameq) == pre - 1, "do_swap_page didn't use a frame\n");
   PFA_ASSERT(!(ret & VM_FAULT_ERROR), "Failed to bookkeep page in do_swap_page() (vaddr=0x%lx, tsk=%d)\n", vmf.address, tskid);
@@ -801,11 +805,12 @@ int pfa_handle_fault(struct vm_fault *vmf)
    * the newq, the frameq could overflow */
   pfa_drain_newq(current->pfa_tsk_id);
   pfa_fill_freeq();
-#endif //CONFIG_PFA_EM
 
 #ifdef CONFIG_PFA_KPFAD
   kpfad_dec_sleep();
 #endif
+
+#endif //CONFIG_PFA_EM
 
   pfa_unlock(global);
 
