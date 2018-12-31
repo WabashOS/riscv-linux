@@ -1351,9 +1351,6 @@ static bool try_to_unmap_one(struct page *page, struct vm_area_struct *vma,
   struct task_struct *tsk;
 #endif
 
-  /* Track the last evicted vaddr, used for unit tests */
-  pfa_pflat_set_vaddr(address, vma);
-
 	/* munlock has nothing to gain from examining un-locked vmas */
 	if ((flags & TTU_MUNLOCK) && !(vma->vm_flags & VM_LOCKED))
 		return true;
@@ -1587,6 +1584,9 @@ static bool try_to_unmap_one(struct page *page, struct vm_area_struct *vma,
             "Page (paddr=0x%llx) (pgid=0x%llx) shared %d times (sharing not supported in pfa)\n",
         page_to_phys(page), pfa_swp_to_pgid(entry, vma_to_task(vma)->pfa_tsk_id), page_mapcount(page));
       pfa_stat_add(n_evicted, 1, vma_to_task(vma));
+
+      /* Track the last evicted vaddr, used for unit tests */
+      pfa_pflat_set_vaddr(address, vma);
 
 #ifdef CONFIG_PFA
       tsk = vma_to_task(vma);

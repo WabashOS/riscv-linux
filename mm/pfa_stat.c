@@ -46,7 +46,6 @@ void pfa_stat_init(void)
   if(sysfs_create_file(mm_kobj, &pfa_sysfs_pflat.attr) != 0)
     pr_err("Failed to create sysfs entries for pfa \"page-fault latency\" experiment\n");
 #endif
-
 }
 
 static const pfa_stat_t __pfa_stat_empty = {0};
@@ -135,6 +134,8 @@ static ssize_t pfa_sysfs_store_statlbl(struct kobject *kobj,
   return 0;
 }
 
+/* state 0: recording evicted pages
+   state 1: recording page-fault start times (to measure trap) */
 int pfa_pflat_state = 0;
 ssize_t pfa_sysfs_show_pflat(struct kobject *kobj,
     struct kobj_attribute *attr, char *buf)

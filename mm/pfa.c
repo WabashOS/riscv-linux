@@ -17,6 +17,10 @@ uint8_t *pfa_log;
 size_t pfa_log_end = 0;
 #endif
 
+/* Protects only direct access to HW queues 
+ * Used by memblade as well (even when PFA not enabled)*/
+DEFINE_SPINLOCK(pfa_hw_mut);
+
 #ifdef CONFIG_PFA
 
 /* Phyiscal addr for MMIO to pfa (see the PFA spec for details) */
@@ -32,9 +36,6 @@ size_t pfa_log_end = 0;
 
 DECLARE_RWSEM(pfa_mutex_global);
 spinlock_t pfa_evict_mut;
-
-/* Protects only direct access to HW queues */
-DEFINE_SPINLOCK(pfa_hw_mut);
 
 /* sysfs stuff */
 ssize_t pfa_sysfs_show_tsk(struct kobject *kobj,
