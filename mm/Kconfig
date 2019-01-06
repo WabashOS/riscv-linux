@@ -549,21 +549,21 @@ config PFA_KPFAD
 
 config PFA_FREEQ_SIZE
   int "Size of free queue"
-  default 10
+  default 64
   help
     Defined by the hardware platform. Really this should be in the device tree
     or something.
 
 config PFA_NEWQ_SIZE
   int "Size of new queue"
-  default 10
+  default 64
   help
     Defined by the hardware platform. Really this should be in the device tree
     or something.
 
 config PFA_EVICTQ_SIZE
   int "Size of evict queue"
-  default 10
+  default 1
   help
     Defined by the hardware platform. Really this should be in the device tree
     or something.

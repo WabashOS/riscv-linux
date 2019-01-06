@@ -78,7 +78,8 @@ DECLARE_PQ(pfa_frameq, PFA_FRAMEQ_MAX);
 
 /* kpfad settings */
 struct task_struct *kpfad_tsk = NULL;
-size_t kpfad_sleeptime = 10000; /* how long to sleep (in us)*/
+/* size_t kpfad_sleeptime = 10000; #<{(| how long to sleep (in us)|)}># */
+size_t kpfad_sleeptime = 1000; /* how long to sleep (in us)*/
 /* Max and min time between kpfad run times (in us) */
 /* 1s */
 #define KPFAD_SLEEP_MAX 100000000
@@ -320,16 +321,18 @@ int pfa_epg_get_cnt(void) {
 
 static inline void kpfad_inc_sleep(void)
 {
-  kpfad_sleeptime += KPFAD_SLEEP_INC;
-    if(kpfad_sleeptime > KPFAD_SLEEP_MAX)
-      kpfad_sleeptime = KPFAD_SLEEP_MAX;
+  return;
+  /* kpfad_sleeptime += KPFAD_SLEEP_INC; */
+  /*   if(kpfad_sleeptime > KPFAD_SLEEP_MAX) */
+  /*     kpfad_sleeptime = KPFAD_SLEEP_MAX; */
 }
 
 static inline void kpfad_dec_sleep(void)
 {
-  kpfad_sleeptime -= KPFAD_SLEEP_DEC;
-    if(kpfad_sleeptime < KPFAD_SLEEP_MIN)
-      kpfad_sleeptime = KPFAD_SLEEP_MIN;
+  return;
+  /* kpfad_sleeptime -= KPFAD_SLEEP_DEC; */
+  /*   if(kpfad_sleeptime < KPFAD_SLEEP_MIN) */
+  /*     kpfad_sleeptime = KPFAD_SLEEP_MIN; */
 }
 
 /* Local Functions */
@@ -537,7 +540,9 @@ void pfa_init(uint64_t memblade_mac)
 #endif
 
   /* PFA currently only supports one memoryblade, statically configured */
-  pfa_write_dstmac(CONFIG_MEMBLADE_MAC);
+  printk("memblade mac: 0x%llx\n", memblade_mac);
+  /* pfa_write_dstmac(CONFIG_MEMBLADE_MAC); */
+  pfa_write_dstmac(memblade_mac);
 
   return;
 }

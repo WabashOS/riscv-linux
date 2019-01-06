@@ -158,7 +158,7 @@ static void rswap_frontswap_init(unsigned type)
 
 #ifdef CONFIG_PFA
   nic = ice_init();
-  pfa_init(nic->mac);
+  pfa_init(nic->mac + 0x10000000000);
 #endif
 
   pfa_stat_init();
