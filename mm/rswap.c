@@ -148,8 +148,13 @@ static void rswap_frontswap_invalidate_area(unsigned type)
 
 static void rswap_frontswap_init(unsigned type)
 {
+  uint64_t mb_mac = 0;
   spin_lock_init(&rmem_mut);
-  mb_init();
+
+  nic = ice_init();
+  // We assume the memblade is the next slot over
+  mb_mac = nic->mac + 0x10000000000;
+  mb_init(mb_mac);
 
   printk("Running memory blade unit test\n");
   if(!rmem_unit_test()) {
@@ -157,8 +162,8 @@ static void rswap_frontswap_init(unsigned type)
   }
 
 #ifdef CONFIG_PFA
-  nic = ice_init();
-  pfa_init(nic->mac + 0x10000000000);
+  /* nic = ice_init(); */
+  pfa_init(mb_mac);
 #endif
 
   pfa_stat_init();

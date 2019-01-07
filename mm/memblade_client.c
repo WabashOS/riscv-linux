@@ -155,8 +155,9 @@ int mb_wait()
   return mb_txid;
 }
 
-void mb_init(void)
+void mb_init(uint64_t mb_mac)
 {
+  printk("Emulating memory blade at MAC: 0x%llx\n", mb_mac);
   /* mb_rmem = (void*)__get_free_pages(GFP_KERNEL, get_order(MEMBLADE_SZ)); */
   mb_rmem = (void*)vmalloc(MEMBLADE_SZ);
   if(!mb_rmem) {
@@ -213,8 +214,9 @@ int mb_wait()
   return res;
 }
 
-void mb_init(void)
+void mb_init(uint64_t mb_mac)
 {
+  printk("Registering with memory blade at MAC: 0x%llx\n", mb_mac);
   mb_io_src   = ioremap(MB_SRC_ADDR, 8);
   mb_io_dst   = ioremap(MB_DST_ADDR, 8);
   mb_io_mac   = ioremap(MB_DSTMAC, 8);
@@ -226,7 +228,8 @@ void mb_init(void)
   mb_io_nresp = ioremap(MB_NRESP, 4);
 
   /* Hard-coded for now for Spike loopback model, need to fix for real HW */
-  mb_dstmac = CONFIG_MEMBLADE_MAC;
+  /* mb_dstmac = CONFIG_MEMBLADE_MAC; */
+  mb_dstmac = mb_mac;
 }
 
 #endif

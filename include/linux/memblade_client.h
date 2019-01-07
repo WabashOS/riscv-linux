@@ -49,5 +49,5 @@ int mb_wait(void);
 
 /* Initialize the remote memory blade client. You must call this exactly once becore using other mb_* functions.
  */
-void mb_init(void);
+void mb_init(uint64_t mb_mac);
 
