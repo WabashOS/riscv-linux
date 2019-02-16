@@ -2956,7 +2956,9 @@ int do_swap_page(struct vm_fault *vmf)
 			}
 #endif //CONFIG_PFA
 		} else {
-      PFA_ASSERT(!is_pfa_tsk(vma_to_task(vma)), "doing readahead for pfa task (sync flag = 0x%lx) (swap_count=%d)\n", si->flags & SWP_SYNCHRONOUS_IO, __swap_count(si, entry));
+      PFA_ASSERT(!is_pfa_tsk(vma_to_task(vma)), "doing readahead for pfa task (vaddr=0x%lx) (sync flag = 0x%lx) (swap_count=%d) (oldpte=0x%lx, newpte=0x%lx)\n",
+          vmf->address, si->flags & SWP_SYNCHRONOUS_IO, __swap_count(si, entry),
+          vmf->orig_pte.pte, (*vmf->pte).pte);
 			if (vma_readahead)
 				page = do_swap_page_readahead(entry,
 					GFP_HIGHUSER_MOVABLE, vmf, &swap_ra);
@@ -3031,7 +3033,9 @@ int do_swap_page(struct vm_fault *vmf)
 	vmf->pte = pte_offset_map_lock(vma->vm_mm, vmf->pmd, vmf->address,
 			&vmf->ptl);
 	if (unlikely(!pte_same(*vmf->pte, vmf->orig_pte))) {
-    PFA_ASSERT(!is_pfa_tsk(vma_to_task(vma)), "unexpected code path\n");
+    PFA_ASSERT(!is_pfa_tsk(vma_to_task(vma)),
+        "PTE changed under our feet while bookkeeping: (vaddr=0x%lx, new=0x%lx, old=0x%lx).\n",
+        vmf->address, (*vmf->pte).pte, vmf->orig_pte.pte);
 		goto out_nomap;
   }
 
@@ -3101,8 +3105,20 @@ int do_swap_page(struct vm_fault *vmf)
 		goto out;
 	}
 
+#ifdef CONFIG_PFA
+  //XXX PFA - it's not clear that this is truly needed. The fear is some race between kpfad and the main thread.
+  if(is_pfa_tsk(vma_to_task(vmf->vma))) {
+    pfa_trace("leaving do_swap_page: (ptep=0x%p, vaddr=0x%lx, pte=0x%lx)\n",
+        vmf->pte, vmf->address, ((*vmf->pte).pte));
+    flush_tlb_all();
+  } else {
+    update_mmu_cache(vma, vmf->address, vmf->pte);
+  }
+#else
 	/* No need to invalidate - it was non-present before */
 	update_mmu_cache(vma, vmf->address, vmf->pte);
+#endif
+
 unlock:
 	pte_unmap_unlock(vmf->pte, vmf->ptl);
 out:
@@ -3990,6 +4006,7 @@ static int handle_pte_fault(struct vm_fault *vmf)
 	}
   
 #ifdef CONFIG_PFA
+  pte_t real_orig = vmf->orig_pte;
   if(is_pfa_tsk(vma_to_task(vmf->vma))) {
     /* Prevent a race with pfa_epg_apply() during eviction. After this, the pte
      * won't change due to pfa code, even if it's in the process of being
@@ -4012,6 +4029,9 @@ static int handle_pte_fault(struct vm_fault *vmf)
      *     we'll try to read it from rswap directly.
      * 3. rem -> !present
      *   - impossible?
+     * 4. !present -> present
+     *   - T1: evicting page, T2: faults page, T1: finishes evicting (!pres->rem), T1: faults in page and drains newq
+     *   - do_swap_page below will notice that the PTE is now present and abort
      *
      * There might be more issues for shared pages / multiple processes
      */
@@ -4019,16 +4039,17 @@ static int handle_pte_fault(struct vm_fault *vmf)
   if(pte_remote(vmf->orig_pte)) {
     return pfa_handle_fault(vmf);
   } else if (pte_fetched(vmf->orig_pte)) {
+    /* XXX PFA */
+    pfa_trace("Cleaning up fetched page: (vaddr=0x%lx, pte=0x%lx)",
+        vmf->address, vmf->orig_pte.pte);
     /* This page hasn't been bookkeeped yet, process it before doing rest of
      * fault handling */
     if(!is_pfa_tsk(vma_to_task(vmf->vma))) {
       panic("Seeing fetched page for non-pfa task.");
     } else {
       pfa_stat_add(n_early_newq, 1, current);
-      pfa_lock(global);
       pfa_drain_newq(current->pfa_tsk_id);
       vmf->orig_pte = *vmf->pte;
-      pfa_unlock(global);
     }
   }
 #endif //CONFIG_PFA
@@ -4036,6 +4057,10 @@ static int handle_pte_fault(struct vm_fault *vmf)
 	if (!pte_present(vmf->orig_pte)) {
     int ret;
     uint64_t start = pfa_stat_clock();
+    if(is_pfa_tsk(vma_to_task(vmf->vma))) {
+      pfa_trace("Fault !present: (ptep=0x%p, vaddr=0x%lx, orig_pte=0x%lx, pte=0x%lx, real_orig=0x%lx)\n",
+          vmf->pte, vmf->address, vmf->orig_pte.pte, (*(vmf->pte)).pte, real_orig.pte);
+    }
 		ret = do_swap_page(vmf);
     pfa_stat_add(t_bookkeeping, pfa_stat_clock() - start, vma_to_task(vmf->vma));
     pfa_stat_add(n_swapfault, 1, vma_to_task(vmf->vma));
@@ -4160,7 +4185,20 @@ static int __handle_mm_fault(struct vm_area_struct *vma, unsigned long address,
 		}
 	}
 
+#ifdef CONFIG_PFA
+  if(is_pfa_tsk(vma_to_task(vmf.vma))) {
+    int ret;
+    pfa_lock(global);
+    ret = handle_pte_fault(&vmf);
+    pfa_unlock(global);
+    return ret;
+  } else {
+    return handle_pte_fault(&vmf);
+  }
+#else
 	return handle_pte_fault(&vmf);
+#endif
+
 }
 
 /*

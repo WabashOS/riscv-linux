@@ -11,8 +11,9 @@
 #include <linux/memblade_client.h>
 #include "internal.h"
 
-#ifdef CONFIG_PFA_VERBOSE
+#if defined(CONFIG_PFA_VERBOSE) && defined(PFA_LOG_DEFER)
 /* Deferred pfa logging */
+DEFINE_SPINLOCK(pfa_log_mut);
 uint8_t *pfa_log;
 size_t pfa_log_end = 0;
 #endif
@@ -79,7 +80,7 @@ DECLARE_PQ(pfa_frameq, PFA_FRAMEQ_MAX);
 /* kpfad settings */
 struct task_struct *kpfad_tsk = NULL;
 /* size_t kpfad_sleeptime = 10000; #<{(| how long to sleep (in us)|)}># */
-size_t kpfad_sleeptime = 1000; /* how long to sleep (in us)*/
+size_t kpfad_sleeptime = 10000; /* how long to sleep (in us)*/
 /* Max and min time between kpfad run times (in us) */
 /* 1s */
 #define KPFAD_SLEEP_MAX 100000000
@@ -173,7 +174,7 @@ void pfa_dbg_free_page(dbg_page_t *ent)
  *    our feet. The "right" way would be to repeat the PT walk, which would be
  *    slow and ugly.
  */
-#define PFA_EPG_SZ 1
+#define PFA_EPG_SZ 10
 typedef struct pfa_epg {
   struct page *pg;
   struct vm_area_struct *vma;
@@ -210,8 +211,8 @@ void pfa_epg_apply(struct page *pg)
   for(i = 0; i < PFA_EPG_SZ; i++) {
     ent = &pfa_epgs[i];
     if(ent->pg == pg) {
-      pfa_trace("Re-writing pte for: (vaddr=0x%lx)\n",
-          ent->addr);
+      pfa_trace("Re-writing pte for: (ptep=0x%p vaddr=0x%lx from=0x%lx to=0x%lx)\n",
+          ent->ptep, ent->addr, (*ent->ptep).pte, ent->rem_pteval.pte);
 
       /* epg is applied only after the page has been completely unmapped.
        * handle_pte_fault should be the only place that the PTE is touched
@@ -227,9 +228,10 @@ void pfa_epg_apply(struct page *pg)
       pfa_epg_cnt--;
       PFA_ASSERT(pfa_epg_cnt >= 0, "Popping from empty list\n");
 
+      //XXX PFA
+      /* flush_tlb_page(vma, addr); */
+      flush_tlb_all();
       spin_unlock_irqrestore(&pfa_evict_mut, flags);
-      flush_tlb_page(vma, addr);
-/* #ifdef CONFIG_PFA_DEBUG */
 #if defined(CONFIG_PFA_DEBUG) && defined(CONFIG_PFA_EM)
       mapped_pg = kmap_atomic(pg);
       /* We store a copy of the page by vaddr here to ensure vaddr values
@@ -501,11 +503,11 @@ void pfa_init(uint64_t memblade_mac)
   printk("Linux Initializing PFA\n");
   spin_lock_init(&pfa_evict_mut);
 
-#ifdef CONFIG_PFA_VERBOSE
-  /* pfa_log = vzalloc(PFA_LOG_SZ); */
-  /* if(!pfa_log) { */
-  /*   panic("Failed to allocate pfa log\n"); */
-  /* } */
+#if defined(CONFIG_PFA_VERBOSE) && defined(PFA_LOG_DEFER)
+  pfa_log = vzalloc(PFA_LOG_SZ);
+  if(!pfa_log) {
+    panic("Failed to allocate pfa log\n");
+  }
 #endif
 
   /* Create sysfs interface
@@ -670,7 +672,8 @@ static void pfa_new(int mmap_sem_tsk)
   vmf.orig_pte = *vmf.pte;
   PFA_ASSERT(!pte_none(vmf.orig_pte), "Invalid PTE\n");
 
-  pfa_trace("Fetching New Page: (pgid=0x%llx) (vaddr=0x%lx) (tsk=%d) (pte=0x%lx)\n",
+  pfa_trace("Fetching New Page: (ptep=0x%p) (pgid=0x%llx) (vaddr=0x%lx) (tsk=%d) (pte=0x%lx)\n",
+      vmf.pte,
       new_pgid,
       vmf.address,
       tskid,
@@ -709,22 +712,34 @@ static void pfa_new(int mmap_sem_tsk)
   return;
 }
 
-void pfa_drain_newq(int mmap_sem_tsk)
+#ifdef CONFIG_PFA_DEBUG
+atomic64_t newq_unique = ATOMIC_INIT(0);
+#endif
+
+int pfa_drain_newq(int mmap_sem_tsk)
 {
   uint64_t nnew;
+  int i;
 
   pfa_assert_lock(global);
+  PFA_ASSERT(atomic64_inc_return(&newq_unique) == 1, "attempted to enter drain_newq recursively\n");
 
   nnew = pfa_read_newstat();
   if(nnew) 
     pfa_trace("Draining %lld items from newq\n", nnew);
 
-  while(nnew)
+  for(i = 0; i < nnew; i++)
   {
     pfa_new(mmap_sem_tsk); 
-    nnew--;
   }
+
+  PFA_ASSERT(atomic64_dec_return(&newq_unique) == 0, "drain newq was run concurrently\n");
+  return nnew;
 }
+
+#ifdef CONFIG_PFA_DEBUG
+atomic64_t freeq_unique = ATOMIC_INIT(0);
+#endif
 
 void pfa_fill_freeq(void)
 {
@@ -732,6 +747,7 @@ void pfa_fill_freeq(void)
   uint64_t nframe;
   
   pfa_assert_lock(global);
+  PFA_ASSERT(atomic64_inc_return(&freeq_unique) == 1, "attempted to enter drain_newq recursively\n");
   
   nframe = pfa_read_freestat();
 
@@ -751,10 +767,12 @@ void pfa_fill_freeq(void)
     pfa_free(pg);
     nframe--;
   }
+  PFA_ASSERT(atomic64_dec_return(&freeq_unique) == 0, "drain newq was run concurrently\n");
 }
 
 int pfa_handle_fault(struct vm_fault *vmf)
 {
+  int nfetched;
 #ifdef CONFIG_PFA_EM
   uintptr_t dst_paddr;
   pfa_pgid_t pgid;
@@ -774,7 +792,7 @@ int pfa_handle_fault(struct vm_fault *vmf)
   pfa_stat_add(n_pfa_fault, 1, current);
 
   /* Note: we must already hold mm->mmap_sem or we could deadlock with kpfad */
-  pfa_lock(global);
+  /* pfa_lock(global); */
 
   if(!is_pfa_tsk(current)) {
     pfa_trace("Page fault on remote page after PFA exited\n");
@@ -794,7 +812,7 @@ int pfa_handle_fault(struct vm_fault *vmf)
 
     /* Note: the order matters here. If you fill the freeq before draining
      * the newq, the frameq could overflow */
-    pfa_drain_newq(current->pfa_tsk_id);
+    nfetched = pfa_drain_newq(current->pfa_tsk_id);
     PFA_ASSERT(PQ_CNT(pfa_frameq) == PQ_CNT(pfa_freeq) + PQ_CNT(pfa_new_id),
       "frameq invalid after drain_newq (pfa_frameq=%d, pfa_freeq=%d, pfa_newq=%d)\n",
       PQ_CNT(pfa_frameq),
@@ -807,6 +825,7 @@ int pfa_handle_fault(struct vm_fault *vmf)
       PQ_CNT(pfa_frameq),
       PQ_CNT(pfa_freeq),
       PQ_CNT(pfa_new_id));
+    pfa_stat_add(n_fault_fetched, nfetched, current);
   }
   
   // Bring in the new page
@@ -814,10 +833,6 @@ int pfa_handle_fault(struct vm_fault *vmf)
   pgid = pfa_remote_to_pgid(vmf->orig_pte);
   rpn = pfa_pgid_rpn(pgid);
   PFA_ASSERT(dst_paddr != 0, "NULL destination!");
-  pfa_trace("Placing rpn 0x%lx into paddr 0x%lx for vaddr 0x%lx\n",
-      rpn,
-      dst_paddr,
-      vmf->address);
   mb_send((uintptr_t)NULL, dst_paddr, MB_OC_PAGE_READ, rpn);
   mb_wait();
   
@@ -838,16 +853,26 @@ int pfa_handle_fault(struct vm_fault *vmf)
 
   // Create new local PTE
   lpte = pfa_remote_to_local(vmf->orig_pte, dst_paddr);
+
+  pfa_trace("Placing rpn 0x%lx into paddr 0x%lx for vaddr 0x%lx (oldPTE=0x%lx, newPTE=0x%lx)\n",
+      rpn,
+      dst_paddr,
+      vmf->address,
+      vmf->orig_pte.pte,
+      lpte.pte);
+
   set_pte_at(vmf->vma->vm_mm, vmf->address, vmf->pte, lpte);
   vmf->orig_pte = lpte;
+
 
 #else //CONFIG_PFA_EM
   /* We should only see a fault with the PFA enabled if the queues need draining */
   /* It's OK to call these even if their queues don't need processing */
   /* Note: the order matters here. If you fill the freeq before draining
    * the newq, the frameq could overflow */
-  pfa_drain_newq(current->pfa_tsk_id);
+  nfetched = pfa_drain_newq(current->pfa_tsk_id);
   pfa_fill_freeq();
+  pfa_stat_add(n_fault_fetched, nfetched, current);
 
 #ifdef CONFIG_PFA_KPFAD
   kpfad_dec_sleep();
@@ -855,12 +880,14 @@ int pfa_handle_fault(struct vm_fault *vmf)
 
 #endif //CONFIG_PFA_EM
 
-  pfa_unlock(global);
 
   /* Even if we didn't change the PTE, we must flush pte from the TLB
    * to trigger another PT walk (at least on Rocket) */
-	update_mmu_cache(vmf->vma, vmf->address, vmf->pte);
+  //XXX PFA
+	/* update_mmu_cache(vmf->vma, vmf->address, vmf->pte); */
+  flush_tlb_all();
 
+  /* pfa_unlock(global); */
   return 0;
 }
 
@@ -917,22 +944,27 @@ int pfa_set_tsk(struct task_struct *tsk)
 
 void pfa_clear_tsk(int tsk_id)
 {
+#if defined(CONFIG_PFA_DEBUG) && defined(CONFIG_PFA_EM)
+  // Empty the debug hashtable
+  int bkt;
+  struct hlist_node *tmp;
+  dbg_page_t *ent;
+#endif
   PFA_ASSERT(tsk_id < PFA_MAX_TASKS && tsk_id >= 0, "Invalid task id: %d\n", tsk_id);
   PFA_ASSERT(pfa_tsk[tsk_id] != NULL, "No valid PFA task at tskid %d\n", tsk_id);
   pfa_trace("De-registering pfa task (tsk=%d)\n", tsk_id);
 
   pfa_lock(global);
 
+#ifdef CONFIG_PFA_KPFAD
+  kthread_stop(kpfad_tsk);
+#endif
+
   pfa_drain_newq(-1);
   pfa_tsk[tsk_id]->pfa_tsk_id = -1;
   pfa_tsk[tsk_id] = NULL;
 
-/* #ifdef CONFIG_PFA_DEBUG */
 #if defined(CONFIG_PFA_DEBUG) && defined(CONFIG_PFA_EM)
-  // Empty the debug hashtable
-  int bkt;
-  struct hlist_node *tmp;
-  dbg_page_t *ent;
   /* hash_for_each_safe(ent, tmp, pfa_dbg_page, _hash) { */
   hash_for_each_safe(pfa_dbg_page, bkt, tmp, ent, _hash) {
     hash_del(&(ent->_hash));
@@ -950,10 +982,14 @@ void pfa_clear_tsk(int tsk_id)
 /* PFA management daemon. Mostly drains newq and fills freeq. */
 static int kpfad(void *p)
 {
+  /* XXX PFA */
+  printk("kswapd started: %d\n", task_tgid_vnr(current));
+
   /* XXX Need to play around to see if this is a good idea... */
 	/* set_user_nice(current, MIN_NICE); */
 
   while(1) {
+    int nfetched;
     uint64_t start = pfa_stat_clock();
     pfa_stat_add(n_kpfad, 1, NULL);
     /* pfa_trace("kpfad running\n"); */
@@ -966,13 +1002,14 @@ static int kpfad(void *p)
     if(pfa_trylock(global)) {
       /* Note: the order matters here. If you fill the freeq before draining
        * the newq, the frameq could overflow */
-      pfa_drain_newq(-1);
+      nfetched = pfa_drain_newq(-1);
       pfa_fill_freeq();
 
       /* Calculate next sleep time */
       kpfad_inc_sleep();
       
       pfa_unlock(global);
+      pfa_stat_add(n_kpfad_fetched, nfetched, NULL);
     }
 
     pfa_stat_add(t_kpfad, pfa_stat_clock() - start, NULL);

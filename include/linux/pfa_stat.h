@@ -35,6 +35,9 @@ typedef struct pfa_stat {
   /* Total number of faults due to full queues */
   atomic64_t n_pfa_fault;
 
+  /* Total number of pages fetched during pfa faults */
+  atomic64_t n_fault_fetched;
+
   /* The total number of times the newq was drained pre-maturely for correctness.
    * The most common cause is write-protected pages being faulted in. */
   atomic64_t n_early_newq;
@@ -51,6 +54,9 @@ typedef struct pfa_stat {
 
   /* Number of invocations of kpfad (regardless of runtime or lock contention) */
   atomic64_t n_kpfad;
+
+  /* Number of pages fetched by kpfad */
+  atomic64_t n_kpfad_fetched;
 
   /* Time that stat recording started for the most recent task. */
   atomic64_t t_start;

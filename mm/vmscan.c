@@ -989,8 +989,9 @@ static unsigned long shrink_page_list(struct list_head *page_list,
 		bool dirty, writeback;
 
 #ifdef CONFIG_PFA_EM
-    PFA_ASSERT(pfa_epg_get_cnt() == 0,
-        "Evicted page queue not empty after shrink_page_list iteration: cnt=%d\n", pfa_epg_get_cnt());
+    /* XXX PFA: if two threads are currently evicting, the epg count could change during an iteration */
+    /* PFA_ASSERT(pfa_epg_get_cnt() == 0, */
+    /*     "Evicted page queue not empty after shrink_page_list iteration: cnt=%d\n", pfa_epg_get_cnt()); */
 #endif
 
 		cond_resched();

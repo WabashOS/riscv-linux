@@ -50,7 +50,7 @@
   do {  \
     if(unlikely(!(COND))) { \
       pfa_dump_trace(); \
-      panic("PFA_ASSERT %s:%d: " MSG, __FILE__, __LINE__, ##__VA_ARGS__); \
+      panic("PFA_ASSERT (%d) %s:%d: " MSG, task_tgid_vnr(current), __FILE__, __LINE__, ##__VA_ARGS__); \
     } \
   } while(0)
 
@@ -82,38 +82,45 @@ void pfa_dbg_clear_page(dbg_page_t *ref);
 #endif //CONFIG_PFA_DEBUG
 
 #ifdef CONFIG_PFA_VERBOSE
-// #define PFA_LOG_SZ (256*1024*1024)
-// extern uint8_t *pfa_log;
-// extern size_t pfa_log_end;
+#define PFA_LOG_DEFER 1
+
+#ifdef PFA_LOG_DEFER
+#define PFA_LOG_SZ (4*1024*1024)
+extern uint8_t *pfa_log;
+extern size_t pfa_log_end;
+extern spinlock_t pfa_log_mut;
 
 /* Use this for noisy messages you might want to turn off */
-#define pfa_trace(M, ...) printk("PFA_TRACE: " M, ##__VA_ARGS__)
-/*
 #define pfa_trace(M, ...) do { \
-  pfa_log_end += snprintf(pfa_log + pfa_log_end, PFA_LOG_SZ - pfa_log_end, "PFA_TRACE: " M, ##__VA_ARGS__); \
+  unsigned long flags; \
+  spin_lock_irqsave(&pfa_log_mut, flags); \
+  pfa_log_end += snprintf(pfa_log + pfa_log_end, PFA_LOG_SZ - pfa_log_end, "PFA_TRACE (%d): " M, task_tgid_vnr(current), ##__VA_ARGS__); \
   if(pfa_log_end > PFA_LOG_SZ) { \
     printk("pfa_trace buffer overflow!\n"); \
     pfa_log_end = 0; \
   } \
+  spin_unlock_irqrestore(&pfa_log_mut, flags); \
 } while(0)
-*/
 
 /* This is a backup that is really slow. I don't know how to print the whole
  * string at once (it's MBs in size and printk won't do it in one shot).
  * You should probably use the dump_log command in gdb (it's much faster)
  */
+static inline void pfa_dump_trace(void) {
+  int i;
+  for(i = 0; pfa_log[i] != 0 && i < pfa_log_end; i++) {
+    printk(KERN_CONT "%c", pfa_log[i]);
+  }
+
+  memset(pfa_log, 0, pfa_log_end);
+  pfa_log_end = 0;
+}
+
+#else //PFA_LOG_DEFER
+#define pfa_trace(M, ...) printk("PFA_TRACE: " M, ##__VA_ARGS__)
 #define pfa_dump_trace() 
-// static inline void pfa_dump_trace(void) {
-//   int i;
-//   printk("pfa_log_end: %lu\n", pfa_log_end);
-//   for(i = 0; pfa_log[i] != 0 && i < pfa_log_end; i++) {
-//     printk(KERN_CONT "%c", pfa_log[i]);
-//   }
-//   printk("i  = %d\n", i);
-//
-//   memset(pfa_log, 0, pfa_log_end);
-//   pfa_log_end = 0;
-// }
+#endif //PFA_LOG_DEFER
+
 #else
 #define pfa_trace(M, ...)
 #define pfa_dump_trace() 
@@ -268,7 +275,7 @@ int64_t pfa_nnew(void);
  * mmap_sem_tsk: Caller may optionally hold exactly one mmap_sem. If it does
  *   hold one, pass that task pfa_tsk_id here, otherwise pass -1.
  * Caller must hold pfa_lock */
-void pfa_drain_newq(int mmap_sem_tsk);
+int pfa_drain_newq(int mmap_sem_tsk);
 
 /* Provides enough free frames to the PFA to fill it's queues
  * Caller must hold pfa_lock */

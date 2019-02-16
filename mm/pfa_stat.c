@@ -79,6 +79,8 @@ ssize_t pfa_sysfs_show_stat(struct kobject *kobj,
       "%ld,"
       "%ld,"
       "%ld,"
+      "%ld,"
+      "%ld,"
       "%ld\n",
       atomic64_read(&pfa_stats.t_run),
       atomic64_read(&pfa_stats.t_bookkeeping),
@@ -86,12 +88,14 @@ ssize_t pfa_sysfs_show_stat(struct kobject *kobj,
       atomic64_read(&pfa_stats.t_rmem_read),
       atomic64_read(&pfa_stats.n_fault),
       atomic64_read(&pfa_stats.t_fault),
+      atomic64_read(&pfa_stats.n_fault_fetched),
       atomic64_read(&pfa_stats.n_swapfault),
       atomic64_read(&pfa_stats.n_pfa_fault),
       atomic64_read(&pfa_stats.n_early_newq),
       atomic64_read(&pfa_stats.n_evicted),
       atomic64_read(&pfa_stats.n_fetched),
       atomic64_read(&pfa_stats.n_kpfad),
+      atomic64_read(&pfa_stats.n_kpfad_fetched),
       atomic64_read(&pfa_stats.t_kpfad));
 }
 
@@ -119,12 +123,14 @@ ssize_t pfa_sysfs_show_statlbl(struct kobject *kobj,
       "t_rmem_read,"
       "n_fault,"
       "t_fault,"
+      "n_fault_fetched,"
       "n_swapfault,"
       "n_pfa_fault,"
       "n_early_newq,"
       "n_evicted,"
       "n_fetched,"
       "n_kpfad,"
+      "n_kpfad_fetched,"
       "t_kpfad\n");
 }
 
