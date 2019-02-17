@@ -3962,6 +3962,11 @@ static int handle_pte_fault(struct vm_fault *vmf)
 {
 	pte_t entry;
 
+#ifdef CONFIG_PFA
+  int ret;
+  pte_t real_orig;
+#endif
+
 	if (unlikely(pmd_none(*vmf->pmd))) {
 		/*
 		 * Leave __pte_alloc() until later: because vm_ops->fault may
@@ -3998,6 +4003,25 @@ static int handle_pte_fault(struct vm_fault *vmf)
 		}
 	}
 
+#ifdef CONFIG_PFA_EM
+  /* Emulate the PFA as early as possible in the boot process (this is the
+   * earliest point in which we have the PTE) */
+  if(pte_remote(vmf->orig_pte)) {
+    if(pfa_em(vmf) == 0) {
+      /* PFA could handle the fault, return immediately (real PFA would never
+       * have triggered a page-fault) */
+      /* XXX TODO: do I need to check for infinite faults here? */
+      return 0;
+    } else {
+    /* The PFA needs servicing (the real PFA would have triggered a
+     * page-fault). We need only update the cached pte and continue on for a
+     * normal page-fault.
+     */
+      vmf->orig_pte = *vmf->pte;
+    }
+  }
+#endif
+
 	if (!vmf->pte) {
 		if (vma_is_anonymous(vmf->vma))
 			return do_anonymous_page(vmf);
@@ -4006,7 +4030,8 @@ static int handle_pte_fault(struct vm_fault *vmf)
 	}
   
 #ifdef CONFIG_PFA
-  pte_t real_orig = vmf->orig_pte;
+  pfa_lock(global);
+  real_orig = vmf->orig_pte;
   if(is_pfa_tsk(vma_to_task(vmf->vma))) {
     /* Prevent a race with pfa_epg_apply() during eviction. After this, the pte
      * won't change due to pfa code, even if it's in the process of being
@@ -4037,7 +4062,9 @@ static int handle_pte_fault(struct vm_fault *vmf)
      */
   }
   if(pte_remote(vmf->orig_pte)) {
-    return pfa_handle_fault(vmf);
+    ret = pfa_handle_fault(vmf);
+    pfa_unlock(global);
+    return ret;
   } else if (pte_fetched(vmf->orig_pte)) {
     /* XXX PFA */
     pfa_trace("Cleaning up fetched page: (vaddr=0x%lx, pte=0x%lx)",
@@ -4052,6 +4079,7 @@ static int handle_pte_fault(struct vm_fault *vmf)
       vmf->orig_pte = *vmf->pte;
     }
   }
+  pfa_unlock(global);
 #endif //CONFIG_PFA
 
 	if (!pte_present(vmf->orig_pte)) {
@@ -4185,20 +4213,7 @@ static int __handle_mm_fault(struct vm_area_struct *vma, unsigned long address,
 		}
 	}
 
-#ifdef CONFIG_PFA
-  if(is_pfa_tsk(vma_to_task(vmf.vma))) {
-    int ret;
-    pfa_lock(global);
-    ret = handle_pte_fault(&vmf);
-    pfa_unlock(global);
-    return ret;
-  } else {
-    return handle_pte_fault(&vmf);
-  }
-#else
 	return handle_pte_fault(&vmf);
-#endif
-
 }
 
 /*

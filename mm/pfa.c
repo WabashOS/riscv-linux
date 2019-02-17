@@ -51,6 +51,9 @@ struct task_struct *pfa_tsk[PFA_MAX_TASKS];
 
 #ifdef CONFIG_PFA_EM
 
+/* This mutex enforces atomic reads/writes from/to the emulated PFA queues. */
+DEFINE_SPINLOCK(pfa_em_mut);
+
 DEFINE_PQ(pfa_freeq, CONFIG_PFA_FREEQ_SIZE, uintptr_t);
 DECLARE_PQ(pfa_freeq, CONFIG_PFA_FREEQ_SIZE);
 
@@ -203,7 +206,7 @@ void pfa_epg_apply(struct page *pg)
   unsigned long addr;
   int i;
 
-#ifdef CONFIG_PFA_DEBUG
+#if defined(CONFIG_PFA_DEBUG) && defined(CONFIG_PFA_EM)
   void *mapped_pg;
 #endif
 
@@ -341,28 +344,43 @@ static inline void kpfad_dec_sleep(void)
 #ifdef CONFIG_PFA_EM
 static void pfa_write_freeq(uintptr_t frame_paddr)
 {
+  unsigned long flags;
+  spin_lock_irqsave(&pfa_em_mut, flags);
   PQ_PUSH(pfa_freeq, frame_paddr);
+  spin_unlock_irqrestore(&pfa_em_mut, flags);
 }
 
 static uintptr_t pfa_freeq_pop(void)
 {
   uintptr_t paddr;
+  unsigned long flags;
+  spin_lock_irqsave(&pfa_em_mut, flags);
   PQ_POP(pfa_freeq, paddr);
+  spin_unlock_irqrestore(&pfa_em_mut, flags);
   return paddr;
 }
 
 static uint64_t pfa_read_freestat(void)
 {
-  return CONFIG_PFA_FREEQ_SIZE - PQ_CNT(pfa_freeq);
+  uint64_t res;
+  unsigned long flags;
+  spin_lock_irqsave(&pfa_em_mut, flags);
+  res = CONFIG_PFA_FREEQ_SIZE - PQ_CNT(pfa_freeq);
+  spin_unlock_irqrestore(&pfa_em_mut, flags);
+  return res;
 }
 
 static void pfa_write_evictq(uint64_t ev)
 {
   uintptr_t page_paddr = (ev & ((1l << PFA_EVICT_RPN_SHIFT) - 1)) << PAGE_SHIFT;
   uint32_t rpn = (uint32_t)(ev >> PFA_EVICT_RPN_SHIFT);
+  unsigned long flags;
+  spin_lock_irqsave(&pfa_em_mut, flags);
 
   mb_send(page_paddr, (uintptr_t)NULL, MB_OC_PAGE_WRITE, rpn);
   mb_wait();
+
+  spin_unlock_irqrestore(&pfa_em_mut, flags);
   return;
 }
 
@@ -374,39 +392,58 @@ static int64_t pfa_read_evictstat(void)
 static pfa_pgid_t pfa_read_newpgid(void)
 {
   uintptr_t vaddr;
+  unsigned long flags;
+  spin_lock_irqsave(&pfa_em_mut, flags);
   PQ_POP(pfa_new_id, vaddr);
+  spin_unlock_irqrestore(&pfa_em_mut, flags);
   return vaddr;
 }
  
 static void pfa_push_newpgid(pfa_pgid_t pgid)
 {
+  unsigned long flags;
+  spin_lock_irqsave(&pfa_em_mut, flags);
   PQ_PUSH(pfa_new_id, pgid);
+  spin_unlock_irqrestore(&pfa_em_mut, flags);
 }
 
 static pfa_pgid_t pfa_read_newvaddr(void)
 {
   pfa_pgid_t id;
+  unsigned long flags;
+  spin_lock_irqsave(&pfa_em_mut, flags);
   PQ_POP(pfa_new_vaddr, id);
+  spin_unlock_irqrestore(&pfa_em_mut, flags);
   return id;
 }
  
 static void pfa_push_newvaddr(uintptr_t vaddr)
 {
+  unsigned long flags;
+  spin_lock_irqsave(&pfa_em_mut, flags);
   PQ_PUSH(pfa_new_vaddr, vaddr);
+  spin_unlock_irqrestore(&pfa_em_mut, flags);
 }
  
 static int64_t pfa_read_newstat(void)
 {
+  int64_t res;
+  unsigned long flags;
+  spin_lock_irqsave(&pfa_em_mut, flags);
   PFA_ASSERT(PQ_CNT(pfa_new_vaddr) == PQ_CNT(pfa_new_id),
       "newID and newVADDR queues out of sync");
-  return PQ_CNT(pfa_new_vaddr);
+  res = PQ_CNT(pfa_new_vaddr);
+  spin_unlock_irqrestore(&pfa_em_mut, flags);
+  return res;
 }
 
 static void pfa_write_dstmac(uint64_t dstmac)
 {
   return;
 }
-#else
+
+#else //CONFIG_PFA_EM
+
 static void pfa_write_freeq(uintptr_t frame_paddr)
 {
   unsigned long flags;
@@ -497,7 +534,7 @@ static int kpfad(void *p);
 
 void pfa_init(uint64_t memblade_mac)
 {
-#ifdef CONFIG_PFA_DEBUG
+#if defined(CONFIG_PFA_DEBUG) && defined(CONFIG_PFA_EM)
   int i = 0;
 #endif
   printk("Linux Initializing PFA\n");
@@ -516,7 +553,6 @@ void pfa_init(uint64_t memblade_mac)
     if(sysfs_create_file(mm_kobj, &pfa_sysfs_tsk.attr) != 0)
           pr_err("Failed to create sysfs entries\n");
   
-/* #ifdef CONFIG_PFA_DEBUG */
 #if defined(CONFIG_PFA_DEBUG) && defined(CONFIG_PFA_EM)
     pfa_dbg_page_freeent = vmalloc(MEMBLADE_NPG*sizeof(dbg_page_t));
     PFA_ASSERT(pfa_dbg_page_freeent, "Couldn't allocate pfa_dbg_page_freeent\n");
@@ -770,62 +806,30 @@ void pfa_fill_freeq(void)
   PFA_ASSERT(atomic64_dec_return(&freeq_unique) == 0, "drain newq was run concurrently\n");
 }
 
-int pfa_handle_fault(struct vm_fault *vmf)
-{
-  int nfetched;
 #ifdef CONFIG_PFA_EM
+int pfa_em(struct vm_fault *vmf)
+{
   uintptr_t dst_paddr;
   pfa_pgid_t pgid;
   uintptr_t rpn;
   pte_t lpte;
-#endif
 
-#if defined(CONFIG_PFA_DEBUG) && defined(CONFIG_PFA_EM)
+#if defined(CONFIG_PFA_DEBUG)
   uint64_t *mapped_pg;
   dbg_page_t *ent;
 #endif
 
-  pfa_trace("Page fault received on remote page (vaddr=0x%lx) (tsk=%d) (pte=0x%lx)\n",
-      vmf->address & PAGE_MASK,
-      current->pfa_tsk_id,
-      pte_val(*(vmf->pte)));
-  pfa_stat_add(n_pfa_fault, 1, current);
-
-  /* Note: we must already hold mm->mmap_sem or we could deadlock with kpfad */
-  /* pfa_lock(global); */
-
-  if(!is_pfa_tsk(current)) {
-    pfa_trace("Page fault on remote page after PFA exited\n");
-    return VM_FAULT_SIGBUS;
-  }
-
-#ifdef CONFIG_PFA_EM
   PFA_ASSERT(PQ_CNT(pfa_frameq) == PQ_CNT(pfa_freeq) + PQ_CNT(pfa_new_id), "frameq invalid at page fault (pfa_frameq=%d, pfa_freeq=%d, pfa_newq=%d\n",
       PQ_CNT(pfa_frameq),
       PQ_CNT(pfa_freeq),
       PQ_CNT(pfa_new_id));
 
-  // If either needs attention, we service both (to match non-emulated behavior)
+  // If any of the queues need service, bail out and request maintenence (the
+  // real PFA would trigger a page fault here)
   if(pfa_read_freestat() == CONFIG_PFA_FREEQ_SIZE ||
      pfa_read_newstat() == CONFIG_PFA_NEWQ_SIZE) {
-    pfa_trace("handling queues. freestat=%llu, newstat=%llu\n", pfa_read_freestat(), pfa_read_newstat());
-
-    /* Note: the order matters here. If you fill the freeq before draining
-     * the newq, the frameq could overflow */
-    nfetched = pfa_drain_newq(current->pfa_tsk_id);
-    PFA_ASSERT(PQ_CNT(pfa_frameq) == PQ_CNT(pfa_freeq) + PQ_CNT(pfa_new_id),
-      "frameq invalid after drain_newq (pfa_frameq=%d, pfa_freeq=%d, pfa_newq=%d)\n",
-      PQ_CNT(pfa_frameq),
-      PQ_CNT(pfa_freeq),
-      PQ_CNT(pfa_new_id));
-
-    pfa_fill_freeq();
-    PFA_ASSERT(PQ_CNT(pfa_frameq) == PQ_CNT(pfa_freeq) + PQ_CNT(pfa_new_id),
-      "frameq invalid after fill_freeq (pfa_frameq=%d, pfa_freeq=%d, pfa_newq=%d)\n",
-      PQ_CNT(pfa_frameq),
-      PQ_CNT(pfa_freeq),
-      PQ_CNT(pfa_new_id));
-    pfa_stat_add(n_fault_fetched, nfetched, current);
+    pfa_trace("pfa_em: queue maintainence needed (freestat=%llu, newstat=%llu)\n", pfa_read_freestat(), pfa_read_newstat());
+    return -1;
   }
   
   // Bring in the new page
@@ -836,8 +840,7 @@ int pfa_handle_fault(struct vm_fault *vmf)
   mb_send((uintptr_t)NULL, dst_paddr, MB_OC_PAGE_READ, rpn);
   mb_wait();
   
-/* #ifdef CONFIG_PFA_DEBUG */
-#if defined(CONFIG_PFA_DEBUG) && defined(CONFIG_PFA_EM)
+#ifdef CONFIG_PFA_DEBUG
   /* Paranoid double check against vaddr */
   ent = pfa_dbg_get_page(vmf->address);
   PFA_ASSERT(ent != NULL, "Couldn't find page for vaddr=0x%lx\n", vmf->address);
@@ -864,8 +867,27 @@ int pfa_handle_fault(struct vm_fault *vmf)
   set_pte_at(vmf->vma->vm_mm, vmf->address, vmf->pte, lpte);
   vmf->orig_pte = lpte;
 
+  return 0;
+}
+#endif
 
-#else //CONFIG_PFA_EM
+int pfa_handle_fault(struct vm_fault *vmf)
+{
+  int nfetched;
+  pfa_trace("Page fault received on remote page (vaddr=0x%lx) (tsk=%d) (pte=0x%lx)\n",
+      vmf->address & PAGE_MASK,
+      current->pfa_tsk_id,
+      pte_val(*(vmf->pte)));
+  pfa_stat_add(n_pfa_fault, 1, current);
+
+  /* Note: we must already hold mm->mmap_sem or we could deadlock with kpfad */
+  /* pfa_lock(global); */
+
+  if(!is_pfa_tsk(current)) {
+    pfa_trace("Page fault on remote page after PFA exited\n");
+    return VM_FAULT_SIGBUS;
+  }
+
   /* We should only see a fault with the PFA enabled if the queues need draining */
   /* It's OK to call these even if their queues don't need processing */
   /* Note: the order matters here. If you fill the freeq before draining
@@ -877,9 +899,6 @@ int pfa_handle_fault(struct vm_fault *vmf)
 #ifdef CONFIG_PFA_KPFAD
   kpfad_dec_sleep();
 #endif
-
-#endif //CONFIG_PFA_EM
-
 
   /* Even if we didn't change the PTE, we must flush pte from the TLB
    * to trigger another PT walk (at least on Rocket) */

@@ -21,7 +21,6 @@
 #define DECLARE_PQ(NAME, SIZE) NAME##_t NAME = {0, 0, 0, SIZE, {0} }
 
 #define PQ_PUSH(Q, VAL) do { \
-  pfa_assert_lock(global); \
   PFA_ASSERT(Q.cnt != Q.size, "Pushing to full queue");  \
   Q.q[Q.head] = VAL;         \
   Q.head = (Q.head + 1) % Q.size; \
@@ -31,7 +30,6 @@
 /* Note: you can't use this like a normal function (it doesn't return anything)
  * you need to provide the destination to store into (literal symbol, not a pointer) */
 #define PQ_POP(Q, DST) do { \
-  pfa_assert_lock(global); \
   PFA_ASSERT(Q.cnt != 0, "Popping from empty queue"); \
   DST = Q.q[Q.tail]; \
   Q.tail = (Q.tail + 1) % Q.size; \
@@ -210,6 +208,11 @@ extern struct rw_semaphore pfa_mutex_global;
 
 extern spinlock_t pfa_hw_mut;
 
+#ifdef CONFIG_PFA_EM
+/* This mutex enforces atomic reads/writes from/to the emulated PFA queues. */
+extern spinlock_t pfa_em_mut;
+#endif
+
 /* Macros here mostly to make it easier to track locking behavior */
 // #define pfa_trace_locks(M, ...) printk("PFA_TRACE_LOCKS: " M, ##__VA_ARGS__)
 #define pfa_trace_locks(M, ...) 
@@ -280,6 +283,9 @@ int pfa_drain_newq(int mmap_sem_tsk);
 /* Provides enough free frames to the PFA to fill it's queues
  * Caller must hold pfa_lock */
 void pfa_fill_freeq(void);
+
+/* Do everything that the real PFA HW would do (and hopefully no more) */
+int pfa_em(struct vm_fault *vmf);
 
 /* Handle a page fault due to PFA error (remote bit set in PTE)
  * Caller must down pfa_tsk->mm->mmap_sem */
