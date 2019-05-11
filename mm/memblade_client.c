@@ -5,6 +5,9 @@
 // XXX PFA - this is kinda janky because it's declared in pfa.h which we can't include here due to circular dependency...
 extern spinlock_t pfa_hw_mut;
 
+// XXX dirty hack to compile on x86 - need to fix portability for real later
+#define phys_to_page(paddr) pfn_to_page(__phys_to_pfn(paddr))
+
 #ifdef CONFIG_MEMBLADE_EM
 
 // Global, pre-allocated 'remote memory' to be used in emulation mode
@@ -48,7 +51,7 @@ static int mb_pg_write(uint64_t pageno, uintptr_t paddr)
 {
   // Remote and user pages respecively
   uint8_t *rpg, *upg;
-  
+
   rpg = mb_pg_get(pageno);
   if(!rpg) {
     return 0;

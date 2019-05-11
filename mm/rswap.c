@@ -157,6 +157,7 @@ static void rswap_frontswap_init(unsigned type)
   mb_init(mb_mac);
 
   printk("Running memory blade unit test\n");
+  printk("emulated memblade: %lu bytes", MEMBLADE_SZ);
   if(!rmem_unit_test()) {
     printk("RMEM doesn't work, don't swap you fools!!!\n");
   }
