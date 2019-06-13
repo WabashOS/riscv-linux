@@ -673,7 +673,7 @@ static void pfa_new(int mmap_sem_tsk)
   tskid = pfa_pgid_to_tsk(new_pgid);
   tsk = pfa_get_tsk(tskid);
   PFA_ASSERT(tsk != NULL, "Couldn't find taskID %d\n", tskid);
-  pfa_stat_add(n_fetched, 1, tsk);
+  /* pfa_stat_add(n_fetched, 1, tsk); */
   
   mm = tsk->mm;
   PFA_ASSERT(mm, "Task %d has no struct mm!\n", tskid);

@@ -109,6 +109,7 @@ static int rswap_frontswap_store(unsigned type, pgoff_t offset,
   rmem_put(page_to_phys(page), pfa_swp_to_rpn(swp_entry(type, offset)));
 #endif
 
+  pfa_stat_add(n_evicted, 1, NULL);
   pfa_stat_add(t_rmem_write, pfa_stat_clock() - start, NULL);
 	return 0;
 }
@@ -126,8 +127,10 @@ static int rswap_frontswap_load(unsigned type, pgoff_t offset,
 
   pfa_trace("frontswap_load rpn=0x%llx dest_paddr=0x%llx\n",
       pfa_swp_to_rpn(swp_entry(type,offset)), page_to_phys(page));
+
   start = pfa_stat_clock();
   rmem_get(page_to_phys(page), pfa_swp_to_rpn(swp_entry(type,offset)));
+
   pfa_stat_add(t_rmem_read, pfa_stat_clock() - start, NULL);
   pfa_stat_add(n_fetched, 1, NULL);
 	return 0;
@@ -151,9 +154,13 @@ static void rswap_frontswap_init(unsigned type)
   uint64_t mb_mac = 0;
   spin_lock_init(&rmem_mut);
 
+#ifndef CONFIG_MEMBLADE_EM
   nic = ice_init();
   // We assume the memblade is the next slot over
   mb_mac = nic->mac + 0x10000000000;
+#else
+  mb_mac = 0x0;
+#endif
   mb_init(mb_mac);
 
   printk("Running memory blade unit test\n");
@@ -163,7 +170,6 @@ static void rswap_frontswap_init(unsigned type)
   }
 
 #ifdef CONFIG_PFA
-  /* nic = ice_init(); */
   pfa_init(mb_mac);
 #endif
 
