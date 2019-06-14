@@ -87,7 +87,7 @@ void pfa_dbg_clear_page(dbg_page_t *ref);
 #endif //CONFIG_PFA_DEBUG
 
 #ifdef CONFIG_PFA_VERBOSE
-#define PFA_LOG_DEFER 1
+// #define PFA_LOG_DEFER 1
 
 #ifdef PFA_LOG_DEFER
 #define PFA_LOG_SZ (4*1024*1024)
