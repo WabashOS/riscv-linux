@@ -867,6 +867,8 @@ int pfa_em(struct vm_fault *vmf)
   set_pte_at(vmf->vma->vm_mm, vmf->address, vmf->pte, lpte);
   vmf->orig_pte = lpte;
 
+  update_mmu_cache(vmf->vma, vmf->address, vmf->pte);
+
   return 0;
 }
 #endif
