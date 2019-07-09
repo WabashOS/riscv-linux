@@ -3,8 +3,7 @@
 // Size of remote memory (in terms of pages). Note that 256 pages == 1MB.
 // Note this defines the size in emulation mode, but may still be used in
 // non-emulation mode (in which it acts as an upper bound on rmem usage)
-// #define MEMBLADE_NPG (512*256)
-#define MEMBLADE_NPG (4096ul*256ul)
+#define MEMBLADE_NPG (512*256)
 
 // Size of remote memory in bytes
 #define MEMBLADE_SZ (MEMBLADE_NPG*PAGE_SIZE)

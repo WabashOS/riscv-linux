@@ -18,7 +18,6 @@
 #include <linux/page_idle.h>
 #include <linux/swapops.h>
 #include <linux/shmem_fs.h>
-#include <linux/pfa.h>
 
 #include <asm/tlb.h>
 #include <asm/pgalloc.h>

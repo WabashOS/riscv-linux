@@ -9,13 +9,6 @@
 #include <linux/pfa_stat.h>
 #include <linux/hashtable.h>
 
-//XXX This is a dirty hack to make things compile on x86
-// these constants are defined in arch/riscv/asm/pgtable-bits.h
-#ifndef _PAGE_FETCHED
-#define _PAGE_FETCHED   (1 << 9)
-#define _PAGE_REMOTE    (1 << 1)
-#endif
-
 /* A generic in-place queue (no pointers) */
 #define DEFINE_PQ(NAME, SIZE, TYPE) typedef struct { \
   int head; \
@@ -126,7 +119,7 @@ static inline void pfa_dump_trace(void) {
 #define pfa_dump_trace() 
 #endif //PFA_LOG_DEFER
 
-#else //CONFIG_PFA_VERBOSE
+#else
 #define pfa_trace(M, ...)
 #define pfa_dump_trace() 
 #endif //CONFIG_PFA_VERBOSE
@@ -380,33 +373,33 @@ static inline struct task_struct *pfa_get_tsk(int tsk_id)
   return pfa_tsk[tsk_id];
 }
 
-// #else //ifdef CONFIG_PFA
-//
-// #<{(| initialize the system, only call once!
-//  * memblade_mac - MAC address for the memory blade to use (configured only once) |)}>#
-// void pfa_init(uint64_t memblade_mac);
-//
-//
-// #<{(| The PFA can only work for one task at a time right now. 
-//  * NULL if no one has registered with the PFA. |)}>#
-// #define PFA_TASK_BITS 5
-// #define PFA_MAX_TASKS (1 << PFA_TASK_BITS)
-// extern struct task_struct *pfa_tsk[PFA_MAX_TASKS];
-//
-// #<{(| Assigns "tsk" to the PFA and gives it a pfa_tsk_id.
-//  * Returns 1 on success, 0 on failure (likely due to too many active pfa
-//  * tasks) |)}>#
-// int pfa_set_tsk(struct task_struct *tsk);
-//
-// #<{(| Must down pfa_tsk->mm->mmap_sem before calling.
-//  * tsk_id: The struct task_struct->pfa_tsk_id feild|)}>#
-// void pfa_clear_tsk(int tsk_id);
-//
-// #define is_pfa_tsk(tsk) (tsk->pfa_tsk_id != -1)
-// static inline struct task_struct *pfa_get_tsk(int tsk_id)
-// {
-//   PFA_ASSERT((tsk_id < PFA_MAX_TASKS && tsk_id >= 0), "Invalid task ID: %d", tsk_id);
-//   return pfa_tsk[tsk_id];
-// }
-// #endif
+#else //ifdef CONFIG_PFA
+
+/* initialize the system, only call once!
+ * memblade_mac - MAC address for the memory blade to use (configured only once) */
+void pfa_init(uint64_t memblade_mac);
+
+
+/* The PFA can only work for one task at a time right now. 
+ * NULL if no one has registered with the PFA. */
+#define PFA_TASK_BITS 5
+#define PFA_MAX_TASKS (1 << PFA_TASK_BITS)
+extern struct task_struct *pfa_tsk[PFA_MAX_TASKS];
+
+/* Assigns "tsk" to the PFA and gives it a pfa_tsk_id.
+ * Returns 1 on success, 0 on failure (likely due to too many active pfa
+ * tasks) */
+int pfa_set_tsk(struct task_struct *tsk);
+
+/* Must down pfa_tsk->mm->mmap_sem before calling.
+ * tsk_id: The struct task_struct->pfa_tsk_id feild*/
+void pfa_clear_tsk(int tsk_id);
+
+#define is_pfa_tsk(tsk) (tsk->pfa_tsk_id != -1)
+static inline struct task_struct *pfa_get_tsk(int tsk_id)
+{
+  PFA_ASSERT((tsk_id < PFA_MAX_TASKS && tsk_id >= 0), "Invalid task ID: %d", tsk_id);
+  return pfa_tsk[tsk_id];
+}
+
 #endif //ifdef __PFA_H__
