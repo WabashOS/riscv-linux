@@ -1,12 +1,13 @@
 #include <linux/types.h>
 
-// Size of remote memory (in terms of pages). Note that 256 pages == 1MB.
+// Size of remote memory in bytes. This must be <= than the swap device
+// (BLK_DEV_RAM in these experiments)
+#define MEMBLADE_SZ CONFIG_BLK_DEV_RAM_SIZE
+
+// Size of remote memory (in terms of pages).
 // Note this defines the size in emulation mode, but may still be used in
 // non-emulation mode (in which it acts as an upper bound on rmem usage)
-#define MEMBLADE_NPG (512*256)
-
-// Size of remote memory in bytes
-#define MEMBLADE_SZ (MEMBLADE_NPG*PAGE_SIZE)
+#define MEMBLADE_NPG (MEMBLADE_SZ / PAGE_SIZE)
 
 // Opcodes
 #define MB_OC_PAGE_READ 0
