@@ -157,7 +157,7 @@ int mb_wait()
 
 void mb_init(uint64_t mb_mac)
 {
-  printk("Emulating memory blade at MAC: 0x%llx\n", mb_mac);
+  printk("Emulating memory blade at MAC: 0x%llx, size: %lld bytes\n", mb_mac, MEMBLADE_SZ);
   /* mb_rmem = (void*)__get_free_pages(GFP_KERNEL, get_order(MEMBLADE_SZ)); */
   mb_rmem = (void*)vmalloc(MEMBLADE_SZ);
   if(!mb_rmem) {

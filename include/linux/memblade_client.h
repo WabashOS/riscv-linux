@@ -1,8 +1,10 @@
 #include <linux/types.h>
 
 // Size of remote memory in bytes. This must be <= than the swap device
-// (BLK_DEV_RAM in these experiments)
-#define MEMBLADE_SZ CONFIG_BLK_DEV_RAM_SIZE
+// (BLK_DEV_RAM in these experiments). BLK_DEV_RAM is calculated a bit
+// strangely, it's in KB, and they reserve one page. We just match the final
+// available swap size.
+#define MEMBLADE_SZ (CONFIG_BLK_DEV_RAM_SIZE*1024 - 4096)
 
 // Size of remote memory (in terms of pages).
 // Note this defines the size in emulation mode, but may still be used in
