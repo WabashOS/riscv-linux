@@ -19,8 +19,7 @@ int mb_txid = -1;
  * read/written, no need to free or "put" the page after */
 static uint8_t *mb_pg_get(uint64_t pageno)
 {
-  if(pageno > MEMBLADE_NPG) {
-    /* pr_err("Requested invalid remote page from memblade: %lld\n", pageno); */
+  if(pageno >= MEMBLADE_NPG) {
     panic("Requested invalid remote page from memblade: %lld\n", pageno);
     return NULL;
   }
@@ -160,6 +159,7 @@ void mb_init(uint64_t mb_mac)
   printk("Emulating memory blade at MAC: 0x%llx, size: %lld bytes\n", mb_mac, MEMBLADE_SZ);
   /* mb_rmem = (void*)__get_free_pages(GFP_KERNEL, get_order(MEMBLADE_SZ)); */
   mb_rmem = (void*)vmalloc(MEMBLADE_SZ);
+  printk("Memblade vaddrs: 0x%llx - 0x%llx\n", mb_rmem, mb_rmem + MEMBLADE_SZ);
   if(!mb_rmem) {
     pr_err("Memory blade emulation failed to initialize.\n");
   }

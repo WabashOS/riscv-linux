@@ -4003,14 +4003,20 @@ static int handle_pte_fault(struct vm_fault *vmf)
 		}
 	}
 
+	if (!vmf->pte) {
+		if (vma_is_anonymous(vmf->vma))
+			return do_anonymous_page(vmf);
+    else
+			return do_fault(vmf);
+	}
+  
 #ifdef CONFIG_PFA_EM
   /* Emulate the PFA as early as possible in the boot process (this is the
    * earliest point in which we have the PTE) */
-  if(pte_remote(vmf->orig_pte)) {
+  if(vmf->pte && pte_remote(vmf->orig_pte)) {
     if(pfa_em(vmf) == 0) {
       /* PFA could handle the fault, return immediately (real PFA would never
        * have triggered a page-fault) */
-      /* XXX TODO: do I need to check for infinite faults here? */
       return 0;
     } else {
     /* The PFA needs servicing (the real PFA would have triggered a
@@ -4022,13 +4028,6 @@ static int handle_pte_fault(struct vm_fault *vmf)
   }
 #endif
 
-	if (!vmf->pte) {
-		if (vma_is_anonymous(vmf->vma))
-			return do_anonymous_page(vmf);
-		else
-			return do_fault(vmf);
-	}
-  
 #ifdef CONFIG_PFA
   pfa_lock(global);
   real_orig = vmf->orig_pte;
