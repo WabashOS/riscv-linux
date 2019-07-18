@@ -464,19 +464,19 @@ static uint64_t pfa_read_freestat(void)
 
 static void pfa_write_evictq(uint64_t ev)
 {
-  unsigned long flags;
-  spin_lock_irqsave(&pfa_hw_mut, flags);
+  /* unsigned long flags; */
+  /* spin_lock_irqsave(&pfa_hw_mut, flags); */
   writeq(ev, pfa_io_evict);
-  spin_unlock_irqrestore(&pfa_hw_mut, flags);
+  /* spin_unlock_irqrestore(&pfa_hw_mut, flags); */
 }
 
 static uint64_t pfa_read_evictstat(void)
 {
   uint64_t res;
-  unsigned long flags;
-  spin_lock_irqsave(&pfa_hw_mut, flags);
+  /* unsigned long flags; */
+  /* spin_lock_irqsave(&pfa_hw_mut, flags); */
   res = readq(pfa_io_evictstat);
-  spin_unlock_irqrestore(&pfa_hw_mut, flags);
+  /* spin_unlock_irqrestore(&pfa_hw_mut, flags); */
   return res;
 }
 
@@ -602,6 +602,7 @@ static void pfa_evict_poll(void)
 void pfa_evict(uintptr_t rpn, phys_addr_t page_paddr)
 {
   uint64_t evict_val;
+  unsigned long flags;
 
   pfa_trace("Actual eviction: (rpn=0x%lx) (paddr=0x%llx)\n", rpn, page_paddr);
 
@@ -611,10 +612,12 @@ void pfa_evict(uintptr_t rpn, phys_addr_t page_paddr)
   evict_val |= rpn << PFA_EVICT_RPN_SHIFT;
 
   
-  /* I'm 99% sure we don't need to lock here because these steps are all atomic and
-   * we don't touch other global PFA datastructures. */
+  /* I'm being slightly paranoid about locks here, I just want to make sure
+   * eviction is atomic */
+  spin_lock_irqsave(&pfa_hw_mut, flags);
   pfa_write_evictq(evict_val);
   pfa_evict_poll();
+  spin_unlock_irqrestore(&pfa_hw_mut, flags);
 }
 
 /* Add the frame at pfn to the list of free frames for the pfa.
