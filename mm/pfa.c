@@ -816,11 +816,16 @@ int pfa_em(struct vm_fault *vmf)
   pfa_pgid_t pgid;
   uintptr_t rpn;
   pte_t lpte;
+  unsigned long flags;
+  uint64_t nfree, nnew;
 
 #if defined(CONFIG_PFA_DEBUG)
   uint64_t *mapped_pg;
   dbg_page_t *ent;
 #endif
+
+  /* pfa_lock(global); */
+  spin_lock_irqsave(&pfa_em_mut, flags);
 
   PFA_ASSERT(PQ_CNT(pfa_frameq) == PQ_CNT(pfa_freeq) + PQ_CNT(pfa_new_id), "frameq invalid at page fault (pfa_frameq=%d, pfa_freeq=%d, pfa_newq=%d\n",
       PQ_CNT(pfa_frameq),
@@ -829,14 +834,18 @@ int pfa_em(struct vm_fault *vmf)
 
   // If any of the queues need service, bail out and request maintenence (the
   // real PFA would trigger a page fault here)
-  if(pfa_read_freestat() == CONFIG_PFA_FREEQ_SIZE ||
-     pfa_read_newstat() == CONFIG_PFA_NEWQ_SIZE) {
-    pfa_trace("pfa_em: queue maintainence needed (freestat=%llu, newstat=%llu)\n", pfa_read_freestat(), pfa_read_newstat());
+  nfree = PQ_CNT(pfa_freeq);
+  nnew  = PQ_CNT(pfa_new_vaddr);
+  if(nfree == 0 || nnew == CONFIG_PFA_NEWQ_SIZE) {
+    pfa_trace("pfa_em: queue maintainence needed (freestat=%llu, newstat=%llu)\n", CONFIG_PFA_FREEQ_SIZE - nfree, nnew);
+    spin_unlock_irqrestore(&pfa_em_mut, flags);
+    /* pfa_unlock(global); */
     return -1;
   }
   
   // Bring in the new page
-  dst_paddr = pfa_freeq_pop();
+  // We access the queue directly because we hold the pfa_em_mut
+  PQ_POP(pfa_freeq, dst_paddr);
   pgid = pfa_remote_to_pgid(vmf->orig_pte);
   rpn = pfa_pgid_rpn(pgid);
   PFA_ASSERT(dst_paddr != 0, "NULL destination!");
@@ -854,8 +863,9 @@ int pfa_em(struct vm_fault *vmf)
 #endif
 
   // Update metadata
-  pfa_push_newpgid(pgid);
-  pfa_push_newvaddr(vmf->address);
+  // We use the queues directly because we hold pfa_em_mut
+  PQ_PUSH(pfa_new_id, pgid);
+  PQ_PUSH(pfa_new_vaddr, vmf->address);
 
   // Create new local PTE
   lpte = pfa_remote_to_local(vmf->orig_pte, dst_paddr);
@@ -872,6 +882,8 @@ int pfa_em(struct vm_fault *vmf)
 
   update_mmu_cache(vmf->vma, vmf->address, vmf->pte);
 
+  spin_unlock_irqrestore(&pfa_em_mut, flags);
+  /* pfa_unlock(global); */
   return 0;
 }
 #endif
