@@ -74,9 +74,13 @@ void __iomem *pfa_io_newstat;
 void __iomem *pfa_io_dstmac;
 #endif
 
-/* Holds every frame (struct page*) that is given to the PFA in FIFO order */
-/* #define PFA_FRAMEQ_MAX (CONFIG_PFA_FREEQ_SIZE + CONFIG_PFA_NEWQ_SIZE) */
-#define PFA_FRAMEQ_MAX (CONFIG_PFA_FREEQ_SIZE)
+/* Holds every frame (struct page*) that is given to the PFA in FIFO order
+ * It's possible with kpfad to fill the freeq twice before processing new pages:
+ * 1. read newq_stat, see no new entries, don't empty
+ * 2. before reading freeq_stat, NEWQ_SIZE faults occur filling newq with unproccessed faults
+ * 3. observe NEWQ_SIZE empty slots from freeq_stat and fill them in
+ */
+#define PFA_FRAMEQ_MAX (CONFIG_PFA_FREEQ_SIZE + CONFIG_PFA_NEWQ_SIZE)
 DEFINE_PQ(pfa_frameq, PFA_FRAMEQ_MAX, struct page*);
 DECLARE_PQ(pfa_frameq, PFA_FRAMEQ_MAX);
 
@@ -629,11 +633,14 @@ static void pfa_free(struct page* pg)
   pfa_write_freeq(page_to_phys(pg));
   pfa_frameq_push(pg);
 #ifdef CONFIG_PFA_EM
-  PFA_ASSERT(PQ_CNT(pfa_frameq) == PQ_CNT(pfa_freeq) + PQ_CNT(pfa_new_id),
-    "frameq invalid after pfa_free (pfa_frameq=%d, pfa_freeq=%d, pfa_newq=%d)\n",
-    PQ_CNT(pfa_frameq),
-    PQ_CNT(pfa_freeq),
-    PQ_CNT(pfa_new_id));
+  /* XXX we can't check this without holding pfa_em_mut but adding extra
+   * synchronization might make races much less likely in em mode than in real
+   * hw. */
+  /* PFA_ASSERT(PQ_CNT(pfa_frameq) == PQ_CNT(pfa_freeq) + PQ_CNT(pfa_new_id), */
+  /*   "frameq invalid after pfa_free (pfa_frameq=%d, pfa_freeq=%d, pfa_newq=%d)\n", */
+  /*   PQ_CNT(pfa_frameq), */
+  /*   PQ_CNT(pfa_freeq), */
+  /*   PQ_CNT(pfa_new_id)); */
 #endif
 }
 
@@ -736,11 +743,13 @@ static void pfa_new(int mmap_sem_tsk)
   PFA_ASSERT(!(ret & VM_FAULT_ERROR), "Failed to bookkeep page in do_swap_page() (vaddr=0x%lx, tsk=%d)\n", vmf.address, tskid);
 #ifdef CONFIG_PFA_EM
   /* We can validate internal PFA queues in emulation mode */
-  PFA_ASSERT(PQ_CNT(pfa_frameq) == PQ_CNT(pfa_freeq) + PQ_CNT(pfa_new_id),
-    "frameq invalid after pfa_new (pfa_frameq=%d, pfa_freeq=%d, pfa_newq=%d)\n",
-    PQ_CNT(pfa_frameq),
-    PQ_CNT(pfa_freeq),
-    PQ_CNT(pfa_new_id));
+  /* XXX this check can't be done safely without holding pfa_em_mut. Any extra
+   * serialization might mask real races with the HW. */ 
+  /* PFA_ASSERT(PQ_CNT(pfa_frameq) == PQ_CNT(pfa_freeq) + PQ_CNT(pfa_new_id), */
+  /*   "frameq invalid after pfa_new (pfa_frameq=%d, pfa_freeq=%d, pfa_newq=%d)\n", */
+  /*   PQ_CNT(pfa_frameq), */
+  /*   PQ_CNT(pfa_freeq), */
+  /*   PQ_CNT(pfa_new_id)); */
 #endif
 
   if(tsk->pfa_tsk_id != mmap_sem_tsk)
@@ -827,10 +836,14 @@ int pfa_em(struct vm_fault *vmf)
   /* pfa_lock(global); */
   spin_lock_irqsave(&pfa_em_mut, flags);
 
-  PFA_ASSERT(PQ_CNT(pfa_frameq) == PQ_CNT(pfa_freeq) + PQ_CNT(pfa_new_id), "frameq invalid at page fault (pfa_frameq=%d, pfa_freeq=%d, pfa_newq=%d\n",
-      PQ_CNT(pfa_frameq),
-      PQ_CNT(pfa_freeq),
-      PQ_CNT(pfa_new_id));
+  /* XXX without holding the pfa_global_mut we can't run this test atomically,
+   * that being said, grabbing pfa_global_mut just to check this serializes
+   * execution somewhat, potentially making races that would happen in hw much
+   * less likely in em mode. */
+  /* PFA_ASSERT(PQ_CNT(pfa_frameq) == PQ_CNT(pfa_freeq) + PQ_CNT(pfa_new_id), "frameq invalid at page fault (pfa_frameq=%d, pfa_freeq=%d, pfa_newq=%d\n", */
+  /*     PQ_CNT(pfa_frameq), */
+  /*     PQ_CNT(pfa_freeq), */
+  /*     PQ_CNT(pfa_new_id)); */
 
   // If any of the queues need service, bail out and request maintenence (the
   // real PFA would trigger a page fault here)
