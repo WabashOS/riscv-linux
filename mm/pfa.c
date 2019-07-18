@@ -386,7 +386,7 @@ static void pfa_write_evictq(uint64_t ev)
 
 static int64_t pfa_read_evictstat(void)
 {
-  return 1;
+  return CONFIG_PFA_EVICTQ_SIZE;
 }
 
 static pfa_pgid_t pfa_read_newpgid(void)
