@@ -4013,10 +4013,12 @@ static int handle_pte_fault(struct vm_fault *vmf)
 #ifdef CONFIG_PFA_EM
   /* Emulate the PFA as early as possible in the boot process (this is the
    * earliest point in which we have the PTE) */
+  up_read(&(vmf->vma->vm_mm->mmap_sem));
   if(vmf->pte && pte_remote(vmf->orig_pte)) {
     if(pfa_em(vmf) == 0) {
       /* PFA could handle the fault, return immediately (real PFA would never
        * have triggered a page-fault) */
+      down_read(&(vmf->vma->vm_mm->mmap_sem));
       return 0;
     } else {
     /* The PFA needs servicing (the real PFA would have triggered a
@@ -4026,6 +4028,7 @@ static int handle_pte_fault(struct vm_fault *vmf)
       vmf->orig_pte = *vmf->pte;
     }
   }
+  down_read(&(vmf->vma->vm_mm->mmap_sem));
 #endif
 
 #ifdef CONFIG_PFA
