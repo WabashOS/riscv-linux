@@ -227,6 +227,8 @@ void mb_init(uint64_t mb_mac)
   /* Hard-coded for now for Spike loopback model, need to fix for real HW */
   /* mb_dstmac = CONFIG_MEMBLADE_MAC; */
   mb_dstmac = mb_mac;
+
+  spin_lock_init(&mb_mut);
 }
 
 #endif
