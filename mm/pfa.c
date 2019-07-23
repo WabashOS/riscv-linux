@@ -601,7 +601,8 @@ static void pfa_evict_poll(void)
 /* Evict a page to the pfa.
  * ptep - paddr of pte for the page to be evicted
  *
- * We hold the page lock for page_paddr
+ * We hold the page lock for page_paddr.
+ * We do NOT hold the pfa_global lock here. Be careful!
  */
 void pfa_evict(uintptr_t rpn, phys_addr_t page_paddr)
 {
@@ -616,8 +617,8 @@ void pfa_evict(uintptr_t rpn, phys_addr_t page_paddr)
   evict_val |= rpn << PFA_EVICT_RPN_SHIFT;
 
   
-  /* I'm being slightly paranoid about locks here, I just want to make sure
-   * eviction is atomic */
+  /* Eviction must be atomic with respect to other PFA accesses. Interleaved
+   * accesses could hang or trigger bogus page-faults.*/
   spin_lock_irqsave(&pfa_hw_mut, flags);
   pfa_write_evictq(evict_val);
   pfa_evict_poll();
@@ -833,7 +834,6 @@ int pfa_em(struct vm_fault *vmf)
   dbg_page_t *ent;
 #endif
 
-  /* pfa_lock(global); */
   spin_lock_irqsave(&pfa_em_mut, flags);
 
   /* XXX without holding the pfa_global_mut we can't run this test atomically,
@@ -896,7 +896,6 @@ int pfa_em(struct vm_fault *vmf)
   update_mmu_cache(vmf->vma, vmf->address, vmf->pte);
 
   spin_unlock_irqrestore(&pfa_em_mut, flags);
-  /* pfa_unlock(global); */
   return 0;
 }
 #endif
@@ -911,7 +910,6 @@ int pfa_handle_fault(struct vm_fault *vmf)
   pfa_stat_add(n_pfa_fault, 1, current);
 
   /* Note: we must already hold mm->mmap_sem or we could deadlock with kpfad */
-  /* pfa_lock(global); */
 
   if(!is_pfa_tsk(current)) {
     pfa_trace("Page fault on remote page after PFA exited\n");

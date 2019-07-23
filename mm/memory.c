@@ -4013,6 +4013,7 @@ static int handle_pte_fault(struct vm_fault *vmf)
 #ifdef CONFIG_PFA_EM
   /* Emulate the PFA as early as possible in the boot process (this is the
    * earliest point in which we have the PTE) */
+  // the real PFA can't hold this sem, drop it before emulating
   up_read(&(vmf->vma->vm_mm->mmap_sem));
   if(vmf->pte && pte_remote(vmf->orig_pte)) {
     if(pfa_em(vmf) == 0) {
