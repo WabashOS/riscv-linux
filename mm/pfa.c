@@ -354,16 +354,6 @@ static void pfa_write_freeq(uintptr_t frame_paddr)
   spin_unlock_irqrestore(&pfa_em_mut, flags);
 }
 
-static uintptr_t pfa_freeq_pop(void)
-{
-  uintptr_t paddr;
-  unsigned long flags;
-  spin_lock_irqsave(&pfa_em_mut, flags);
-  PQ_POP(pfa_freeq, paddr);
-  spin_unlock_irqrestore(&pfa_em_mut, flags);
-  return paddr;
-}
-
 static uint64_t pfa_read_freestat(void)
 {
   uint64_t res;
@@ -403,14 +393,6 @@ static pfa_pgid_t pfa_read_newpgid(void)
   return vaddr;
 }
  
-static void pfa_push_newpgid(pfa_pgid_t pgid)
-{
-  unsigned long flags;
-  spin_lock_irqsave(&pfa_em_mut, flags);
-  PQ_PUSH(pfa_new_id, pgid);
-  spin_unlock_irqrestore(&pfa_em_mut, flags);
-}
-
 static pfa_pgid_t pfa_read_newvaddr(void)
 {
   pfa_pgid_t id;
@@ -421,14 +403,6 @@ static pfa_pgid_t pfa_read_newvaddr(void)
   return id;
 }
  
-static void pfa_push_newvaddr(uintptr_t vaddr)
-{
-  unsigned long flags;
-  spin_lock_irqsave(&pfa_em_mut, flags);
-  PQ_PUSH(pfa_new_vaddr, vaddr);
-  spin_unlock_irqrestore(&pfa_em_mut, flags);
-}
- 
 static int64_t pfa_read_newstat(void)
 {
   int64_t res;
@@ -436,7 +410,9 @@ static int64_t pfa_read_newstat(void)
   spin_lock_irqsave(&pfa_em_mut, flags);
   PFA_ASSERT(PQ_CNT(pfa_new_vaddr) == PQ_CNT(pfa_new_id),
       "newID and newVADDR queues out of sync");
-  res = PQ_CNT(pfa_new_vaddr);
+  /* The real HW checks only new_id here. Honestly, this should be the max(id,
+   * vaddr), but SW never checks this when the queues are out of sync. */
+  res = PQ_CNT(pfa_new_id);
   spin_unlock_irqrestore(&pfa_em_mut, flags);
   return res;
 }
@@ -827,7 +803,7 @@ int pfa_em(struct vm_fault *vmf)
   uintptr_t rpn;
   pte_t lpte;
   unsigned long flags;
-  uint64_t nfree, nnew;
+  uint64_t nfree, nnew_vaddr, nnew_pgid;
 
 #if defined(CONFIG_PFA_DEBUG)
   uint64_t *mapped_pg;
@@ -848,11 +824,15 @@ int pfa_em(struct vm_fault *vmf)
   // If any of the queues need service, bail out and request maintenence (the
   // real PFA would trigger a page fault here)
   nfree = PQ_CNT(pfa_freeq);
-  nnew  = PQ_CNT(pfa_new_vaddr);
-  if(nfree == 0 || nnew == CONFIG_PFA_NEWQ_SIZE) {
-    pfa_trace("pfa_em: queue maintainence needed (freestat=%llu, newstat=%llu)\n", CONFIG_PFA_FREEQ_SIZE - nfree, nnew);
+  nnew_vaddr  = PQ_CNT(pfa_new_vaddr);
+  nnew_pgid  = PQ_CNT(pfa_new_id);
+  if(nfree == 0 ||
+     nnew_vaddr == CONFIG_PFA_NEWQ_SIZE ||
+     nnew_pgid == CONFIG_PFA_NEWQ_SIZE)
+  {
+    pfa_trace("pfa_em: queue maintainence needed (freestat=%llu, nnewVaddr=%llu, nnewPgid=%llu)\n",
+        CONFIG_PFA_FREEQ_SIZE - nfree, nnew_vaddr, nnew_pgid);
     spin_unlock_irqrestore(&pfa_em_mut, flags);
-    /* pfa_unlock(global); */
     return -1;
   }
   
