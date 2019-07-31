@@ -124,12 +124,25 @@ static int rswap_frontswap_load(unsigned type, pgoff_t offset,
         struct page *page)
 {
   uint64_t start;
+#ifdef CONFIG_PFA
+  unsigned long flags;
+#endif
 
   pfa_trace("frontswap_load rpn=0x%llx dest_paddr=0x%llx\n",
       pfa_swp_to_rpn(swp_entry(type,offset)), page_to_phys(page));
 
   start = pfa_stat_clock();
+#ifdef CONFIG_PFA
+  /* With PFA enabled, this memblade access can race with eviction */
+  /* XXX can this also race with fetch? It shouldn't because the only time this
+   * should be called is from the page fault handler which has blocked the user
+   * thread. It might also be called by pfa_new though...*/
+  spin_lock_irqsave(&pfa_hw_mut, flags);
+#endif
   rmem_get(page_to_phys(page), pfa_swp_to_rpn(swp_entry(type,offset)));
+#ifdef CONFIG_PFA
+  spin_unlock_irqrestore(&pfa_hw_mut, flags);
+#endif
 
   pfa_stat_add(t_rmem_read, pfa_stat_clock() - start, NULL);
   pfa_stat_add(n_fetched, 1, NULL);
