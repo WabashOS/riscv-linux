@@ -240,11 +240,11 @@ void pfa_epg_apply(struct page *pg)
       flush_tlb_all();
       spin_unlock_irqrestore(&pfa_evict_mut, flags);
 #if defined(CONFIG_PFA_DEBUG) && defined(CONFIG_PFA_EM)
-      mapped_pg = kmap_atomic(pg);
-      /* We store a copy of the page by vaddr here to ensure vaddr values
-       * match in addition to swap offsets */
-      pfa_dbg_record_page(mapped_pg, addr, NULL);
-      kunmap_atomic(mapped_pg);
+      /* mapped_pg = kmap_atomic(pg); */
+      /* #<{(| We store a copy of the page by vaddr here to ensure vaddr values */
+      /*  * match in addition to swap offsets |)}># */
+      /* pfa_dbg_record_page(mapped_pg, addr, NULL); */
+      /* kunmap_atomic(mapped_pg); */
 #endif
       return;
     }
@@ -775,6 +775,9 @@ void pfa_fill_freeq(void)
   PFA_ASSERT(atomic64_inc_return(&freeq_unique) == 1, "attempted to enter drain_newq recursively\n");
   
   nframe = pfa_read_freestat();
+  if(nframe > 0) {
+    pfa_trace("Adding %llu frames to freelist\n", nframe);
+  }
 
   while(nframe) {
     /* This might block or trigger swapping which would be bad if we call
@@ -846,13 +849,13 @@ int pfa_em(struct vm_fault *vmf)
   mb_wait();
   
 #ifdef CONFIG_PFA_DEBUG
-  /* Paranoid double check against vaddr */
-  ent = pfa_dbg_get_page(vmf->address);
-  PFA_ASSERT(ent != NULL, "Couldn't find page for vaddr=0x%lx\n", vmf->address);
-  mapped_pg = kmap_atomic(phys_to_page(dst_paddr));
-  PFA_ASSERT(pg_cmp((uint64_t*)mapped_pg, (uint64_t*)(ent->pg)) == 0, "Remote and debug cached pages don't match for vaddr=0x%lx\n", vmf->address);
-  kunmap_atomic(mapped_pg);
-  pfa_dbg_free_page(ent);
+  /* #<{(| Paranoid double check against vaddr |)}># */
+  /* ent = pfa_dbg_get_page(vmf->address); */
+  /* PFA_ASSERT(ent != NULL, "Couldn't find page for vaddr=0x%lx\n", vmf->address); */
+  /* mapped_pg = kmap_atomic(phys_to_page(dst_paddr)); */
+  /* PFA_ASSERT(pg_cmp((uint64_t*)mapped_pg, (uint64_t*)(ent->pg)) == 0, "Remote and debug cached pages don't match for vaddr=0x%lx\n", vmf->address); */
+  /* kunmap_atomic(mapped_pg); */
+  /* pfa_dbg_free_page(ent); */
 #endif
 
   // Update metadata
@@ -1010,7 +1013,7 @@ void pfa_clear_tsk(int tsk_id)
 static int kpfad(void *p)
 {
   /* XXX PFA */
-  printk("kswapd started: %d\n", task_tgid_vnr(current));
+  printk("kpfad started: %d\n", task_tgid_vnr(current));
 
   /* XXX Need to play around to see if this is a good idea... */
 	/* set_user_nice(current, MIN_NICE); */

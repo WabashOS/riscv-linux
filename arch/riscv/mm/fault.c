@@ -226,6 +226,7 @@ out_of_memory:
 	if (!user_mode(regs))
 		goto no_context;
 	pagefault_out_of_memory();
+  pfa_dump_trace();
   pfa_stat_add(t_fault, pfa_stat_clock() - start_time, current);
 	return;
 

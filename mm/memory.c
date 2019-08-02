@@ -3963,7 +3963,7 @@ static int handle_pte_fault(struct vm_fault *vmf)
 	pte_t entry;
 
 #ifdef CONFIG_PFA
-  int ret;
+  int ret = 0;
   pte_t real_orig;
 #endif
 
@@ -4014,22 +4014,22 @@ static int handle_pte_fault(struct vm_fault *vmf)
   /* Emulate the PFA as early as possible in the boot process (this is the
    * earliest point in which we have the PTE) */
   // the real PFA can't hold this sem, drop it before emulating
-  up_read(&(vmf->vma->vm_mm->mmap_sem));
+  /* up_read(&(vmf->vma->vm_mm->mmap_sem)); */
   if(vmf->pte && pte_remote(vmf->orig_pte)) {
     if(pfa_em(vmf) == 0) {
       /* PFA could handle the fault, return immediately (real PFA would never
-       * have triggered a page-fault) */
-      down_read(&(vmf->vma->vm_mm->mmap_sem));
+       * have triggered a page-fault).
+       * Note that a return of 0 unconditionally retries the access without any
+       * special accounting, we don't return VM_FAULT_RETRY in an attempt to
+       * more closely match the real HW behavior. This exposes us to the chance
+       * of infinite page faults. */
+      /* down_read(&(vmf->vma->vm_mm->mmap_sem)); */
       return 0;
-    } else {
-    /* The PFA needs servicing (the real PFA would have triggered a
-     * page-fault). We need only update the cached pte and continue on for a
-     * normal page-fault.
-     */
-      vmf->orig_pte = *vmf->pte;
     }
+    /* else: The PFA needs servicing (the real PFA would have triggered a
+     * page-fault). */
   }
-  down_read(&(vmf->vma->vm_mm->mmap_sem));
+  /* down_read(&(vmf->vma->vm_mm->mmap_sem)); */
 #endif
 
 #ifdef CONFIG_PFA
@@ -4060,10 +4060,33 @@ static int handle_pte_fault(struct vm_fault *vmf)
      * 4. !present -> present
      *   - T1: evicting page, T2: faults page, T1: finishes evicting (!pres->rem), T1: faults in page and drains newq
      *   - do_swap_page below will notice that the PTE is now present and abort
+     * 5. present -> !present
+     *   - Sometimes the PTE goes from a perfectly normal looking PTE (that
+     *     shouldn't fault) that points to a paddr that was recently added to the
+     *     freeq, to pte_none. This must be some sort of memory consistency
+     *     issue.
+     *   - See comment below, I can't explain this behavior, and it
+     *     doesn't seem to require the epg_drop to actually drop anything.
      *
      * There might be more issues for shared pages / multiple processes
      */
+
+    //XXX PFA: I really don't know exactly what is causing this, but
+    //occasionally, the PTE will between here and the walk above. It goes from
+    //a present PTE pointing to a paddr that was recently added to the freeq (why would such a PTE exist?) to
+    //a 0x0 PTE. My only guess is that something with alloc_page (called by
+    //fill_freeq in kpfad) is racing with a page fault. Anyway, when this
+    //happens, just retry the access and hope for the best (I can't be sure
+    //this really fixes it).
+    if(!pte_same(vmf->orig_pte, real_orig)) {
+      printk("Fetch raced with eviction: (real_orig=0x%lx) (new_pte=0x%lx) (fault_flag=0x%lx)\n",
+          real_orig.pte, vmf->orig_pte.pte, vmf->flags);
+      up_read(&vmf->vma->vm_mm->mmap_sem);
+      pfa_unlock(global);
+      return VM_FAULT_RETRY;
+    }
   }
+
   if(pte_remote(vmf->orig_pte)) {
     ret = pfa_handle_fault(vmf);
     pfa_unlock(global);
