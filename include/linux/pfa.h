@@ -214,7 +214,7 @@ extern spinlock_t pfa_em_mut;
 #endif
 
 /* Macros here mostly to make it easier to track locking behavior */
-// #define pfa_trace_locks(M, ...) printk("PFA_TRACE_LOCKS (%d): " M, task_tgid_vnr(current), ##__VA_ARGS__)
+// #define pfa_trace_locks(M, ...) pfa_trace("PFA_TRACE_LOCKS (%d): " M, task_tgid_vnr(current), ##__VA_ARGS__)
 #define pfa_trace_locks(M, ...) 
 
 #define pfa_lock(LOCK) do { \
@@ -226,7 +226,7 @@ extern spinlock_t pfa_em_mut;
 static inline int __pfa_trylock(const char *file, int line, struct rw_semaphore *lock) {
   int res = down_write_trylock(lock);
   if(res)
-    pfa_trace("Try Locked PFA: %s:%d\n", file, line);
+    pfa_trace_locks("Try Locked PFA: %s:%d\n", file, line);
   // else
   //   pfa_trace_locks("Failed to Lock PFA: %s:%d\n", file, line);
 

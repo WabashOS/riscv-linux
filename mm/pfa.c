@@ -86,8 +86,7 @@ DECLARE_PQ(pfa_frameq, PFA_FRAMEQ_MAX);
 
 /* kpfad settings */
 struct task_struct *kpfad_tsk = NULL;
-/* size_t kpfad_sleeptime = 10000; #<{(| how long to sleep (in us)|)}># */
-size_t kpfad_sleeptime = 10000; /* how long to sleep (in us)*/
+size_t kpfad_sleeptime = 1000; /* how long to sleep (in us)*/
 /* Max and min time between kpfad run times (in us) */
 /* 1s */
 #define KPFAD_SLEEP_MAX 100000000
@@ -408,8 +407,6 @@ static int64_t pfa_read_newstat(void)
   int64_t res;
   unsigned long flags;
   spin_lock_irqsave(&pfa_em_mut, flags);
-  PFA_ASSERT(PQ_CNT(pfa_new_vaddr) == PQ_CNT(pfa_new_id),
-      "newID and newVADDR queues out of sync");
   /* The real HW checks only new_id here. Honestly, this should be the max(id,
    * vaddr), but SW never checks this when the queues are out of sync. */
   res = PQ_CNT(pfa_new_id);
@@ -1012,39 +1009,49 @@ void pfa_clear_tsk(int tsk_id)
 /* PFA management daemon. Mostly drains newq and fills freeq. */
 static int kpfad(void *p)
 {
-  /* XXX PFA */
+  struct mm_struct *mm;
+
   printk("kpfad started: %d\n", task_tgid_vnr(current));
 
   /* XXX Need to play around to see if this is a good idea... */
 	/* set_user_nice(current, MIN_NICE); */
 
+  //XXX I'm assuming max 1 PFA task at a time
+  mm = pfa_get_tsk(0)->mm;
   while(1) {
     int nfetched;
     uint64_t start = pfa_stat_clock();
-    pfa_stat_add(n_kpfad, 1, NULL);
-    /* pfa_trace("kpfad running\n"); */
 
     if (kthread_should_stop())
       break;
 
-    /* NOTE: Lock acquisition order matters here */
-    /* Not a big deal if we can't get the pfa_lock, just try again later */
-    if(pfa_trylock(global)) {
-      /* Note: the order matters here. If you fill the freeq before draining
-       * the newq, the frameq could overflow */
-      nfetched = pfa_drain_newq(-1);
-      pfa_fill_freeq();
+    /* Keep kpfad running as long as it potentially has work to do */
+    if(pfa_read_newstat() != 0) {
+      /* Not a big deal if we can't get the pfa_lock, just try again later 
+         Some other code-paths take mmap_sem before grabbing pfa_global, this
+       * could deadlock. We must grab them in this order. */
+      if(down_read_trylock(&mm->mmap_sem)) {
+        if(pfa_trylock(global)) {
+          /* Note: the order matters here. If you fill the freeq before draining
+           * the newq, the frameq could overflow */
+          nfetched = pfa_drain_newq(0);
+          pfa_fill_freeq();
 
-      /* Calculate next sleep time */
-      kpfad_inc_sleep();
-      
-      pfa_unlock(global);
-      pfa_stat_add(n_kpfad_fetched, nfetched, NULL);
+          /* Calculate next sleep time */
+          kpfad_inc_sleep();
+          
+          pfa_unlock(global);
+          pfa_stat_add(n_kpfad_fetched, nfetched, NULL);
+        }
+        up_read(&mm->mmap_sem);
+      }
+    /* } */
+    } else {
+      pfa_stat_add(n_kpfad, 1, NULL);
+      usleep_range(kpfad_sleeptime, kpfad_sleeptime + KPFAD_SLEEP_SLACK);
     }
 
     pfa_stat_add(t_kpfad, pfa_stat_clock() - start, NULL);
-
-    usleep_range(kpfad_sleeptime, kpfad_sleeptime + KPFAD_SLEEP_SLACK);
   }
 
   printk("kpfad exiting\n");

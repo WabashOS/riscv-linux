@@ -4033,14 +4033,15 @@ static int handle_pte_fault(struct vm_fault *vmf)
 #endif
 
 #ifdef CONFIG_PFA
-  pfa_lock(global);
   real_orig = vmf->orig_pte;
   if(is_pfa_tsk(vma_to_task(vmf->vma))) {
+    pfa_lock(global);
     /* Prevent a race with pfa_epg_apply() during eviction. After this, the pte
      * won't change due to pfa code, even if it's in the process of being
      * evicted. Normal kernel pte races could still exist (but will be handled
      * normally). */
     pfa_epg_drop_ptep(vmf->pte);
+    pfa_unlock(global);
     barrier();
     vmf->orig_pte = *vmf->pte;
     /* Several cases now:
@@ -4079,15 +4080,13 @@ static int handle_pte_fault(struct vm_fault *vmf)
     //happens, just retry the access and hope for the best (I can't be sure
     //this really fixes it).
     if(!pte_same(vmf->orig_pte, real_orig)) {
-      printk("Fetch raced with eviction: (real_orig=0x%lx) (new_pte=0x%lx) (fault_flag=0x%lx)\n",
-          real_orig.pte, vmf->orig_pte.pte, vmf->flags);
       up_read(&vmf->vma->vm_mm->mmap_sem);
-      pfa_unlock(global);
       return VM_FAULT_RETRY;
     }
   }
 
   if(pte_remote(vmf->orig_pte)) {
+    pfa_lock(global);
     ret = pfa_handle_fault(vmf);
     pfa_unlock(global);
     return ret;
@@ -4101,11 +4100,12 @@ static int handle_pte_fault(struct vm_fault *vmf)
       panic("Seeing fetched page for non-pfa task.");
     } else {
       pfa_stat_add(n_early_newq, 1, current);
+      pfa_lock(global);
       pfa_drain_newq(current->pfa_tsk_id);
+      pfa_unlock(global);
       vmf->orig_pte = *vmf->pte;
     }
   }
-  pfa_unlock(global);
 #endif //CONFIG_PFA
 
 	if (!pte_present(vmf->orig_pte)) {
