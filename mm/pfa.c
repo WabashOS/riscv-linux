@@ -105,18 +105,6 @@ size_t kpfad_sleeptime = 1000; /* how long to sleep (in us)*/
 
 /* #ifdef CONFIG_PFA_DEBUG */
 #if defined(CONFIG_PFA_DEBUG) && defined(CONFIG_PFA_EM)
-static int pg_cmp(uint64_t *p1, uint64_t *p2)
-{
-  int i;
-  for(i = 0; i < 4096 / sizeof(uint64_t); i++)
-  {
-    if(p1[i] != p2[i]) {
-      printk("Pages mismatch at index %d (%llx != %llx)\n", i, p1[i], p2[i]);
-      return 1;
-    }
-  }
-  return 0;
-}
 
 DEFINE_HASHTABLE(pfa_dbg_page, 12);
 dbg_page_t *pfa_dbg_page_freeent;
@@ -208,10 +196,6 @@ void pfa_epg_apply(struct page *pg)
   struct vm_area_struct *vma;
   unsigned long addr;
   int i;
-
-#if defined(CONFIG_PFA_DEBUG) && defined(CONFIG_PFA_EM)
-  void *mapped_pg;
-#endif
 
   spin_lock_irqsave(&pfa_evict_mut, flags);
   for(i = 0; i < PFA_EPG_SZ; i++) {
@@ -788,21 +772,7 @@ int pfa_em(struct vm_fault *vmf)
   unsigned long flags;
   uint64_t nfree, nnew_vaddr, nnew_pgid;
 
-#if defined(CONFIG_PFA_DEBUG)
-  uint64_t *mapped_pg;
-  dbg_page_t *ent;
-#endif
-
   spin_lock_irqsave(&pfa_em_mut, flags);
-
-  /* XXX without holding the pfa_global_mut we can't run this test atomically,
-   * that being said, grabbing pfa_global_mut just to check this serializes
-   * execution somewhat, potentially making races that would happen in hw much
-   * less likely in em mode. */
-  /* PFA_ASSERT(PQ_CNT(pfa_frameq) == PQ_CNT(pfa_freeq) + PQ_CNT(pfa_new_id), "frameq invalid at page fault (pfa_frameq=%d, pfa_freeq=%d, pfa_newq=%d\n", */
-  /*     PQ_CNT(pfa_frameq), */
-  /*     PQ_CNT(pfa_freeq), */
-  /*     PQ_CNT(pfa_new_id)); */
 
   // If any of the queues need service, bail out and request maintenence (the
   // real PFA would trigger a page fault here)
@@ -828,16 +798,6 @@ int pfa_em(struct vm_fault *vmf)
   mb_send((uintptr_t)NULL, dst_paddr, MB_OC_PAGE_READ, rpn);
   mb_wait();
   
-#ifdef CONFIG_PFA_DEBUG
-  /* #<{(| Paranoid double check against vaddr |)}># */
-  /* ent = pfa_dbg_get_page(vmf->address); */
-  /* PFA_ASSERT(ent != NULL, "Couldn't find page for vaddr=0x%lx\n", vmf->address); */
-  /* mapped_pg = kmap_atomic(phys_to_page(dst_paddr)); */
-  /* PFA_ASSERT(pg_cmp((uint64_t*)mapped_pg, (uint64_t*)(ent->pg)) == 0, "Remote and debug cached pages don't match for vaddr=0x%lx\n", vmf->address); */
-  /* kunmap_atomic(mapped_pg); */
-  /* pfa_dbg_free_page(ent); */
-#endif
-
   // Update metadata
   // We use the queues directly because we hold pfa_em_mut
   PQ_PUSH(pfa_new_id, pgid);
