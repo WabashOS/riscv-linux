@@ -4035,13 +4035,13 @@ static int handle_pte_fault(struct vm_fault *vmf)
 #ifdef CONFIG_PFA
   real_orig = vmf->orig_pte;
   if(is_pfa_tsk(vma_to_task(vmf->vma))) {
-    pfa_lock(global);
+    /* pfa_lock(global); */
     /* Prevent a race with pfa_epg_apply() during eviction. After this, the pte
      * won't change due to pfa code, even if it's in the process of being
      * evicted. Normal kernel pte races could still exist (but will be handled
      * normally). */
     pfa_epg_drop_ptep(vmf->pte);
-    pfa_unlock(global);
+    /* pfa_unlock(global); */
     barrier();
     vmf->orig_pte = *vmf->pte;
     /* Several cases now:

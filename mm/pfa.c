@@ -238,13 +238,6 @@ void pfa_epg_apply(struct page *pg)
       /* flush_tlb_page(vma, addr); */
       flush_tlb_all();
       spin_unlock_irqrestore(&pfa_evict_mut, flags);
-#if defined(CONFIG_PFA_DEBUG) && defined(CONFIG_PFA_EM)
-      /* mapped_pg = kmap_atomic(pg); */
-      /* #<{(| We store a copy of the page by vaddr here to ensure vaddr values */
-      /*  * match in addition to swap offsets |)}># */
-      /* pfa_dbg_record_page(mapped_pg, addr, NULL); */
-      /* kunmap_atomic(mapped_pg); */
-#endif
       return;
     }
   }
@@ -702,7 +695,7 @@ static void pfa_new(int mmap_sem_tsk)
   /* Put the swap entry back into the PTE so we can use the unmodified
    * do_swap_page 
    * NOTE: this clears _PAGE_FETCHED as well */
-  /* XXX This loses the dirty bit!!! */
+  /* XXX This loses the dirty bit (dealt with below). */
   vmf.orig_pte = swp_entry_to_pte(entry);
 	set_pte_at(mm, vmf.address, vmf.pte, vmf.orig_pte);
 
@@ -715,16 +708,6 @@ static void pfa_new(int mmap_sem_tsk)
   ret = do_swap_page(&vmf);
   PFA_ASSERT(PQ_CNT(pfa_frameq) == pre - 1, "do_swap_page didn't use a frame\n");
   PFA_ASSERT(!(ret & VM_FAULT_ERROR), "Failed to bookkeep page in do_swap_page() (vaddr=0x%lx, tsk=%d)\n", vmf.address, tskid);
-#ifdef CONFIG_PFA_EM
-  /* We can validate internal PFA queues in emulation mode */
-  /* XXX this check can't be done safely without holding pfa_em_mut. Any extra
-   * serialization might mask real races with the HW. */ 
-  /* PFA_ASSERT(PQ_CNT(pfa_frameq) == PQ_CNT(pfa_freeq) + PQ_CNT(pfa_new_id), */
-  /*   "frameq invalid after pfa_new (pfa_frameq=%d, pfa_freeq=%d, pfa_newq=%d)\n", */
-  /*   PQ_CNT(pfa_frameq), */
-  /*   PQ_CNT(pfa_freeq), */
-  /*   PQ_CNT(pfa_new_id)); */
-#endif
 
   if(tsk->pfa_tsk_id != mmap_sem_tsk)
     up_read(&(tsk->mm->mmap_sem));
@@ -910,9 +893,8 @@ int pfa_handle_fault(struct vm_fault *vmf)
 
   /* Even if we didn't change the PTE, we must flush pte from the TLB
    * to trigger another PT walk (at least on Rocket) */
-  //XXX PFA
-	/* update_mmu_cache(vmf->vma, vmf->address, vmf->pte); */
-  flush_tlb_all();
+	update_mmu_cache(vmf->vma, vmf->address, vmf->pte);
+  /* flush_tlb_all(); */
 
   /* pfa_unlock(global); */
   return 0;
@@ -963,8 +945,9 @@ int pfa_set_tsk(struct task_struct *tsk)
 
 #ifdef CONFIG_PFA_KPFAD
   kpfad_tsk = kthread_run(kpfad, NULL, "kpfad");
-  // Hard-coded to only run on core 0 since experiments all run on cores 1-N
-  set_cpus_allowed_ptr(kpfad_tsk, cpumask_of(0));
+  // Hard-coded to only run on core 3 since experiments all run on core 2 
+  // be sure to isolcpus=2,3 for best results
+  set_cpus_allowed_ptr(kpfad_tsk, cpumask_of(3));
 #endif
   return 1;
 }
