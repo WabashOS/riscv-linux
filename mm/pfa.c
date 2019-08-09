@@ -507,18 +507,6 @@ void pfa_init(uint64_t memblade_mac)
     if(sysfs_create_file(mm_kobj, &pfa_sysfs_tsk.attr) != 0)
           pr_err("Failed to create sysfs entries\n");
   
-#if defined(CONFIG_PFA_DEBUG) && defined(CONFIG_PFA_EM)
-    pfa_dbg_page_freeent = vmalloc(MEMBLADE_NPG*sizeof(dbg_page_t));
-    PFA_ASSERT(pfa_dbg_page_freeent, "Couldn't allocate pfa_dbg_page_freeent\n");
-    pfa_dbg_page_freepg = vmalloc(MEMBLADE_NPG*PAGE_SIZE);
-    PFA_ASSERT(pfa_dbg_page_freepg, "Couldn't allocate debug free page array\n");
-    for(i = 0; i < MEMBLADE_NPG; i++) {
-      dbg_page_t *ent = &(pfa_dbg_page_freeent[i]);
-      ent->pg = &(pfa_dbg_page_freepg[i*PAGE_SIZE]);
-      hlist_add_head(&(ent->_hash), &(pfa_dbg_page_free));
-    }
-#endif
-
 #ifndef CONFIG_PFA_EM
   /* Setup MMIO */
   pfa_io_free = ioremap(PFA_IO_FREEFRAME, 8);
