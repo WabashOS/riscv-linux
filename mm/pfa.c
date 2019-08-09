@@ -583,16 +583,6 @@ static void pfa_free(struct page* pg)
   pfa_trace("Adding (paddr=0x%lx) to freelist\n", (unsigned long)page_to_phys(pg));
   pfa_write_freeq(page_to_phys(pg));
   pfa_frameq_push(pg);
-#ifdef CONFIG_PFA_EM
-  /* XXX we can't check this without holding pfa_em_mut but adding extra
-   * synchronization might make races much less likely in em mode than in real
-   * hw. */
-  /* PFA_ASSERT(PQ_CNT(pfa_frameq) == PQ_CNT(pfa_freeq) + PQ_CNT(pfa_new_id), */
-  /*   "frameq invalid after pfa_free (pfa_frameq=%d, pfa_freeq=%d, pfa_newq=%d)\n", */
-  /*   PQ_CNT(pfa_frameq), */
-  /*   PQ_CNT(pfa_freeq), */
-  /*   PQ_CNT(pfa_new_id)); */
-#endif
 }
 
 /* Process one entry from the newq.
@@ -601,7 +591,7 @@ static void pfa_free(struct page* pg)
  *    this holds it's task_id (-1 if caller doesn't hold any mmap_sems).
  *
  * Note: Much of this code is stolen from handle_mm_fault */
-static void pfa_new(int mmap_sem_tsk)
+static void pfa_new(int mmap_sem_tsk, uintptr_t new_addr, pfa_pgid_t new_pgid)
 {
   int ret;
   int pre;
@@ -612,7 +602,6 @@ static void pfa_new(int mmap_sem_tsk)
                        FAULT_FLAG_USER;
 	struct vm_fault vmf;
   swp_entry_t entry;
-  pfa_pgid_t new_pgid;
   int tskid;
   struct task_struct *tsk;
 
@@ -621,13 +610,7 @@ static void pfa_new(int mmap_sem_tsk)
   
   uint64_t start = pfa_stat_clock();
 
-#ifdef CONFIG_PFA_DEBUG
-  PFA_ASSERT(pfa_read_newstat() != 0, "Trying to pop empty newq\n");
-#endif
-
-  /* Get the new page info from newq and frameq */
-  vmf.address = pfa_read_newvaddr() & PAGE_MASK;
-  new_pgid = pfa_read_newpgid();
+  vmf.address = new_addr;
   
   entry = pfa_pgid_to_swp(new_pgid);
   
@@ -708,6 +691,8 @@ atomic64_t newq_unique = ATOMIC_INIT(0);
 int pfa_drain_newq(int mmap_sem_tsk)
 {
   uint64_t nnew;
+  uintptr_t new_addr;
+  pfa_pgid_t new_pgid;
   int i;
 
   pfa_assert_lock(global);
@@ -719,7 +704,14 @@ int pfa_drain_newq(int mmap_sem_tsk)
 
   for(i = 0; i < nnew; i++)
   {
-    pfa_new(mmap_sem_tsk); 
+#ifdef CONFIG_PFA_DEBUG
+    PFA_ASSERT(pfa_read_newstat() != 0, "Trying to pop empty newq\n");
+#endif
+
+    new_addr = pfa_read_newvaddr() & PAGE_MASK;
+    new_pgid = pfa_read_newpgid();
+ 
+    pfa_new(mmap_sem_tsk, new_addr, new_pgid); 
   }
 
   PFA_ASSERT(atomic64_dec_return(&newq_unique) == 0, "drain newq was run concurrently\n");
@@ -954,10 +946,7 @@ static int kpfad(void *p)
 {
   struct mm_struct *mm;
 
-  printk("kpfad started: %d\n", task_tgid_vnr(current));
-
-  /* XXX Need to play around to see if this is a good idea... */
-	/* set_user_nice(current, MIN_NICE); */
+  printk("kpfad started: (pid=%d) (cpu=%d)\n", task_tgid_vnr(current), smp_processor_id());
 
   //XXX I'm assuming max 1 PFA task at a time
   mm = pfa_get_tsk(0)->mm;
@@ -988,11 +977,11 @@ static int kpfad(void *p)
         }
         up_read(&mm->mmap_sem);
       }
-    /* } */
-    } else {
-      pfa_stat_add(n_kpfad, 1, NULL);
-      usleep_range(kpfad_sleeptime, kpfad_sleeptime + KPFAD_SLEEP_SLACK);
     }
+    /* } else { */
+    /*   pfa_stat_add(n_kpfad, 1, NULL); */
+    /*   usleep_range(kpfad_sleeptime, kpfad_sleeptime + KPFAD_SLEEP_SLACK); */
+    /* } */
 
     pfa_stat_add(t_kpfad, pfa_stat_clock() - start, NULL);
   }
