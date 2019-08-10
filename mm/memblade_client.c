@@ -33,7 +33,7 @@ static int mb_pg_read(uint64_t pageno, uintptr_t paddr)
     return 0;
   }
 
-  upg = kmap_atomic(phys_to_page(paddr));
+  upg = kmap_atomic(pfn_to_page(PHYS_PFN(paddr)));
   memcpy(upg, rpg, PAGE_SIZE);
   kunmap_atomic(upg);
   
@@ -50,7 +50,7 @@ static int mb_pg_write(uint64_t pageno, uintptr_t paddr)
     return 0;
   }
 
-  upg = kmap_atomic(phys_to_page(paddr));
+  upg = kmap_atomic(pfn_to_page(PHYS_PFN(paddr)));
   memcpy(rpg, upg, PAGE_SIZE);
   kunmap_atomic(upg);
   
@@ -72,7 +72,7 @@ static int mb_wd_read(uint64_t pageno, uintptr_t paddr)
     return 0;
   }
 
-  upg = kmap_atomic(phys_to_page(paddr));
+  upg = kmap_atomic(pfn_to_page(PHYS_PFN(paddr)));
   memcpy(upg + off, rpg + off, 8);
   kunmap_atomic(upg);
   
@@ -94,7 +94,7 @@ static int mb_wd_write(uint64_t pageno, uintptr_t paddr)
     return 0;
   }
 
-  upg = kmap_atomic(phys_to_page(paddr));
+  upg = kmap_atomic(pfn_to_page(PHYS_PFN(paddr)));
   memcpy(rpg + off, upg + off, 8);
   kunmap_atomic(upg);
   

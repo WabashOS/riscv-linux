@@ -12,9 +12,9 @@ find  $LNX                                                                \
     -name "*.[chxsS]" -print > cscope.files
 
 # I can't make find exluce /arch/* except /arch/riscv, force it here
-# find $LNX \
-#   -path "$LNX/arch/x86/*" \
-#   -name "*.[chxsS]" >> cscope.files
+find $LNX \
+  -path "$LNX/arch/x86/*" \
+  -name "*.[chxsS]" >> cscope.files
 
 find $LNX \
   -path "$LNX/arch/riscv/*" \

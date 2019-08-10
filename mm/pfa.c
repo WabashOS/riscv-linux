@@ -9,6 +9,7 @@
 #include <linux/pfa_stat.h>
 #include <linux/icenet_raw.h>
 #include <linux/memblade_client.h>
+#include <asm/tlbflush.h>
 #include "internal.h"
 
 #if defined(CONFIG_PFA_VERBOSE) && defined(PFA_LOG_DEFER)

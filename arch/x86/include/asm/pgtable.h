@@ -185,6 +185,17 @@ static inline int pte_special(pte_t pte)
 	return pte_flags(pte) & _PAGE_SPECIAL;
 }
 
+static inline int pte_remote(pte_t pte)
+{
+  return (!(pte_val(pte) & _PAGE_PRESENT) &&
+           (pte_val(pte) & _PAGE_REMOTE));
+}
+
+static inline int pte_fetched(pte_t pte)
+{
+  return pte_val(pte) & _PAGE_FETCHED;
+}
+
 static inline unsigned long pte_pfn(pte_t pte)
 {
 	return (pte_val(pte) & PTE_PFN_MASK) >> PAGE_SHIFT;
