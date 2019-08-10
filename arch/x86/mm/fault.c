@@ -29,6 +29,7 @@
 #include <asm/trace/exceptions.h>
 
 #include <linux/pfa_stat.h>
+#include <linux/pfa.h>
 /*
  * Returns 0 if mmiotrace is disabled, or if the fault is not
  * handled by mmiotrace:
@@ -1255,6 +1256,19 @@ __do_page_fault(struct pt_regs *regs, unsigned long error_code,
   /* XXX PFA 
    * Used by page fault latency test */
   pfa_pflat_set_start(address);
+
+#ifdef CONFIG_PFA_EM
+  /* Emulate the PFA as early as possible in the boot process */
+  if(is_pfa_tsk(tsk) && pfa_em(mm, address) == 0) {
+    /* PFA could handle the fault, return immediately (real PFA would never
+     * have triggered a page-fault).
+     * Note that a return of 0 unconditionally retries the access without any
+     * special accounting, we don't return VM_FAULT_RETRY in an attempt to
+     * more closely match the real HW behavior. This exposes us to the chance
+     * of infinite page faults. */
+    return;
+  }
+#endif
 
 	/*
 	 * Detect and handle instructions that would cause a page fault for

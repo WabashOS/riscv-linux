@@ -845,7 +845,7 @@ int pfa_em(struct mm_struct *mm, uintptr_t addr)
 
     *pte = lpte;
 
-    local_flush_tlb_page(addr);
+    flush_tlb_all();
     spin_unlock_irqrestore(&pfa_em_mut, flags);
     return 0;
   } else {
