@@ -255,7 +255,8 @@ void pfa_epg_add(struct page *pg, pmd_t *pmd, pte_t *ptep, pte_t rem_pteval, str
   PFA_ASSERT(0, "Evicted page list full!\n");
 }
 
-int pfa_epg_drop(struct page *pg) {
+int pfa_epg_drop(struct page *pg)
+{
   unsigned long flags;
   int i;
 
@@ -549,7 +550,6 @@ void pfa_evict(uintptr_t rpn, phys_addr_t page_paddr)
   unsigned long flags;
 
   pfa_trace("Actual eviction: (rpn=0x%lx) (paddr=0x%llx)\n", rpn, page_paddr);
-
   /* Form the packed eviction value defined in pfa spec */
   evict_val = page_paddr >> PAGE_SHIFT;
   PFA_ASSERT(evict_val >> PFA_EVICT_RPN_SHIFT == 0, "paddr component of eviction string too large\n");
@@ -941,7 +941,6 @@ static int kpfad(void *p)
   mm = pfa_get_tsk(0)->mm;
   while(1) {
     int nfetched;
-    uint64_t start = pfa_stat_clock();
 
     if (kthread_should_stop())
       break;
@@ -953,6 +952,7 @@ static int kpfad(void *p)
        * could deadlock. We must grab them in this order. */
       if(down_read_trylock(&mm->mmap_sem)) {
         if(pfa_trylock(global)) {
+          uint64_t start = pfa_stat_clock();
           /* Note: the order matters here. If you fill the freeq before draining
            * the newq, the frameq could overflow */
           nfetched = pfa_drain_newq(0);
@@ -963,6 +963,7 @@ static int kpfad(void *p)
           
           pfa_unlock(global);
           pfa_stat_add(n_kpfad_fetched, nfetched, NULL);
+          pfa_stat_add(t_kpfad, pfa_stat_clock() - start, NULL);
         }
         up_read(&mm->mmap_sem);
       }
@@ -972,7 +973,6 @@ static int kpfad(void *p)
     /*   usleep_range(kpfad_sleeptime, kpfad_sleeptime + KPFAD_SLEEP_SLACK); */
     /* } */
 
-    pfa_stat_add(t_kpfad, pfa_stat_clock() - start, NULL);
   }
 
   printk("kpfad exiting\n");

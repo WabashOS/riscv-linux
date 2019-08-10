@@ -988,12 +988,6 @@ static unsigned long shrink_page_list(struct list_head *page_list,
 		enum page_references references = PAGEREF_RECLAIM_CLEAN;
 		bool dirty, writeback;
 
-#ifdef CONFIG_PFA_EM
-    /* XXX PFA: if two threads are currently evicting, the epg count could change during an iteration */
-    /* PFA_ASSERT(pfa_epg_get_cnt() == 0, */
-    /*     "Evicted page queue not empty after shrink_page_list iteration: cnt=%d\n", pfa_epg_get_cnt()); */
-#endif
-
 		cond_resched();
 
 		page = lru_to_page(page_list);

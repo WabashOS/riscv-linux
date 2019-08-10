@@ -1578,12 +1578,12 @@ static bool try_to_unmap_one(struct page *page, struct vm_area_struct *vma,
 
       /* The PFA will get right-screwy if we evict shared pages. Who knows what
        * chaos might ensue if that happens! */
-      /* Note: checked out here to collect stats, even in baseline mode */
       PFA_ASSERT(!is_pfa_tsk(vma_to_task(vma)) || page_mapcount(page) <= 1,
             "Page (paddr=0x%llx) (pgid=0x%llx) shared %d times (sharing not supported in pfa)\n",
         page_to_phys(page), pfa_swp_to_pgid(entry, vma_to_task(vma)->pfa_tsk_id), page_mapcount(page));
 
       /* Track the last evicted vaddr, used for unit tests */
+      /* Note: checked out here to collect stats, even in baseline mode */
       pfa_pflat_set_vaddr(address, vma);
 
 #ifdef CONFIG_PFA
@@ -1597,9 +1597,7 @@ static bool try_to_unmap_one(struct page *page, struct vm_area_struct *vma,
       rem_pteval = pteval;
 
       /* Rocket doesn't set these in HW, it causes traps instead. By setting
-       * these pre-emptively, we avoid those traps.
-       * XXX PFA todo: check if this is Spike only, or if it happens on FireSim.
-       * */
+       * these pre-emptively, we avoid those traps. */
       rem_pteval = pte_mkdirty(rem_pteval);
       rem_pteval = pte_mkyoung(rem_pteval);
 
