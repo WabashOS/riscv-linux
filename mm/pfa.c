@@ -663,7 +663,8 @@ static void pfa_new(int mmap_sem_tsk, uintptr_t new_addr, pfa_pgid_t new_pgid)
   vmf.flags |= FAULT_FLAG_WRITE;
   ret = do_swap_page(&vmf);
   PFA_ASSERT(PQ_CNT(pfa_frameq) == pre - 1, "do_swap_page didn't use a frame\n");
-  PFA_ASSERT(!(ret & VM_FAULT_ERROR), "Failed to bookkeep page in do_swap_page() (vaddr=0x%lx, tsk=%d)\n", vmf.address, tskid);
+  PFA_ASSERT((ret == VM_FAULT_MAJOR) || (ret == (VM_FAULT_MAJOR | VM_FAULT_WRITE)),
+      "Failed to bookkeep page in do_swap_page() (ret=0x%lx, vaddr=0x%lx, tsk=%d)\n", ret, vmf.address, tskid);
 
   if(tsk->pfa_tsk_id != mmap_sem_tsk)
     up_read(&(tsk->mm->mmap_sem));
@@ -945,29 +946,48 @@ static int kpfad(void *p)
     if (kthread_should_stop())
       break;
 
-    /* Keep kpfad running as long as it potentially has work to do */
     if(pfa_read_newstat() != 0) {
-      /* Not a big deal if we can't get the pfa_lock, just try again later 
-         Some other code-paths take mmap_sem before grabbing pfa_global, this
-       * could deadlock. We must grab them in this order. */
-      if(down_read_trylock(&mm->mmap_sem)) {
-        if(pfa_trylock(global)) {
-          uint64_t start = pfa_stat_clock();
-          /* Note: the order matters here. If you fill the freeq before draining
-           * the newq, the frameq could overflow */
-          nfetched = pfa_drain_newq(0);
-          pfa_fill_freeq();
+      down_read(&mm->mmap_sem);
+      pfa_lock(global);
 
-          /* Calculate next sleep time */
-          kpfad_inc_sleep();
-          
-          pfa_unlock(global);
-          pfa_stat_add(n_kpfad_fetched, nfetched, NULL);
-          pfa_stat_add(t_kpfad, pfa_stat_clock() - start, NULL);
-        }
-        up_read(&mm->mmap_sem);
-      }
+      uint64_t start = pfa_stat_clock();
+      /* Note: the order matters here. If you fill the freeq before draining
+       * the newq, the frameq could overflow */
+      nfetched = pfa_drain_newq(0);
+      pfa_fill_freeq();
+
+      pfa_unlock(global);
+      up_read(&mm->mmap_sem);
+      pfa_stat_add(n_kpfad_fetched, nfetched, NULL);
+      pfa_stat_add(t_kpfad, pfa_stat_clock() - start, NULL);
+    } else {
+      /* we're effectively polling newstat */
+      cpu_relax();
     }
+
+    /* Keep kpfad running as long as it potentially has work to do */
+    /* if(pfa_read_newstat() != 0) { */
+    /*   #<{(| Not a big deal if we can't get the pfa_lock, just try again later  */
+    /*      Some other code-paths take mmap_sem before grabbing pfa_global, this */
+    /*    * could deadlock. We must grab them in this order. |)}># */
+    /*   if(down_read_trylock(&mm->mmap_sem)) { */
+    /*     if(pfa_trylock(global)) { */
+    /*       uint64_t start = pfa_stat_clock(); */
+    /*       #<{(| Note: the order matters here. If you fill the freeq before draining */
+    /*        * the newq, the frameq could overflow |)}># */
+    /*       nfetched = pfa_drain_newq(0); */
+    /*       pfa_fill_freeq(); */
+    /*  */
+    /*       #<{(| Calculate next sleep time |)}># */
+    /*       kpfad_inc_sleep(); */
+    /*        */
+    /*       pfa_unlock(global); */
+    /*       pfa_stat_add(n_kpfad_fetched, nfetched, NULL); */
+    /*       pfa_stat_add(t_kpfad, pfa_stat_clock() - start, NULL); */
+    /*     } */
+    /*     up_read(&mm->mmap_sem); */
+    /*   } */
+    /* } */
     /* } else { */
     /*   pfa_stat_add(n_kpfad, 1, NULL); */
     /*   usleep_range(kpfad_sleeptime, kpfad_sleeptime + KPFAD_SLEEP_SLACK); */
