@@ -6,10 +6,10 @@ set print pretty on
 b panic
 
 # user segfault
-b arch/riscv/mm/fault.c:193
+b arch/riscv/mm/fault.c:204
 
 # kernel segfault
-b arch/riscv/mm/fault.c:210
+b arch/riscv/mm/fault.c:224
 
 # give us a chance to dump the log if we want
 b pfa_dump_trace

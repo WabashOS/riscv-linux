@@ -54,6 +54,20 @@ asmlinkage void do_page_fault(struct pt_regs *regs)
 	mm = tsk->mm;
 
   pfa_pflat_set_start(addr);
+
+#ifdef CONFIG_PFA_EM
+  /* Emulate the PFA as early as possible in the boot process */
+  if(is_pfa_tsk(tsk) && pfa_em(mm, addr) == 0) {
+    /* PFA could handle the fault, return immediately (real PFA would never
+     * have triggered a page-fault).
+     * Note that a return of 0 unconditionally retries the access without any
+     * special accounting, we don't return VM_FAULT_RETRY in an attempt to
+     * more closely match the real HW behavior. This exposes us to the chance
+     * of infinite page faults. */
+    return 0;
+  }
+#endif
+
   pfa_stat_add(n_fault, 1, current);
 
 	/*

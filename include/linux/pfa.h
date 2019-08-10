@@ -285,7 +285,7 @@ int pfa_drain_newq(int mmap_sem_tsk);
 void pfa_fill_freeq(void);
 
 /* Do everything that the real PFA HW would do (and hopefully no more) */
-int pfa_em(struct vm_fault *vmf);
+int pfa_em(struct mm_struct *mm, uintptr_t addr);
 
 /* Handle a page fault due to PFA error (remote bit set in PTE)
  * Caller must down pfa_tsk->mm->mmap_sem */

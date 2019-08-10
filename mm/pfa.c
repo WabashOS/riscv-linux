@@ -490,9 +490,6 @@ static int kpfad(void *p);
 
 void pfa_init(uint64_t memblade_mac)
 {
-#if defined(CONFIG_PFA_DEBUG) && defined(CONFIG_PFA_EM)
-  int i = 0;
-#endif
   printk("Linux Initializing PFA\n");
   spin_lock_init(&pfa_evict_mut);
 
@@ -664,7 +661,7 @@ static void pfa_new(int mmap_sem_tsk, uintptr_t new_addr, pfa_pgid_t new_pgid)
   ret = do_swap_page(&vmf);
   PFA_ASSERT(PQ_CNT(pfa_frameq) == pre - 1, "do_swap_page didn't use a frame\n");
   PFA_ASSERT((ret == VM_FAULT_MAJOR) || (ret == (VM_FAULT_MAJOR | VM_FAULT_WRITE)),
-      "Failed to bookkeep page in do_swap_page() (ret=0x%lx, vaddr=0x%lx, tsk=%d)\n", ret, vmf.address, tskid);
+      "Failed to bookkeep page in do_swap_page() (ret=0x%x, vaddr=0x%lx, tsk=%d)\n", ret, vmf.address, tskid);
 
   if(tsk->pfa_tsk_id != mmap_sem_tsk)
     up_read(&(tsk->mm->mmap_sem));
@@ -745,19 +742,9 @@ void pfa_fill_freeq(void)
 }
 
 #ifdef CONFIG_PFA_EM
-int pfa_em(struct vm_fault *vmf)
-{
-  uintptr_t dst_paddr;
-  pfa_pgid_t pgid;
-  uintptr_t rpn;
-  pte_t lpte;
-  unsigned long flags;
+int pfa_em_checkQ(void) {
   uint64_t nfree, nnew_vaddr, nnew_pgid;
 
-  spin_lock_irqsave(&pfa_em_mut, flags);
-
-  // If any of the queues need service, bail out and request maintenence (the
-  // real PFA would trigger a page fault here)
   nfree = PQ_CNT(pfa_freeq);
   nnew_vaddr  = PQ_CNT(pfa_new_vaddr);
   nnew_pgid  = PQ_CNT(pfa_new_id);
@@ -767,41 +754,103 @@ int pfa_em(struct vm_fault *vmf)
   {
     pfa_trace("pfa_em: queue maintainence needed (freestat=%llu, nnewVaddr=%llu, nnewPgid=%llu)\n",
         CONFIG_PFA_FREEQ_SIZE - nfree, nnew_vaddr, nnew_pgid);
-    spin_unlock_irqrestore(&pfa_em_mut, flags);
+    return 0;
+  }
+  return 1;
+} 
+
+/* a very low-level walk. Returns NULL if it can't find the pte. */
+pte_t *pfa_walk(struct mm_struct *mm, uintptr_t addr)
+{
+  pgd_t *pgd;
+  p4d_t *p4d;
+  pud_t *pud;
+  pmd_t *pmd;
+
+  pgd = pgd_offset(mm, addr);
+  if(!pgd || pgd_none(*pgd)) {
+    return NULL;
+  }
+
+  p4d = p4d_offset(pgd, addr);
+  if(!p4d || p4d_none(*p4d)) {
+    return NULL;
+  }
+
+  pud = pud_offset(p4d, addr);
+  if(!pud || pud_none(*pud)) {
+    return NULL;
+  }
+
+  pmd = pmd_offset(pud, addr);
+  if(!pmd || pmd_none(*pmd)) {
+    return NULL;
+  }
+
+  return pte_offset_map(pmd, addr);
+}
+
+int pfa_em(struct mm_struct *mm, uintptr_t addr)
+{
+  uintptr_t dst_paddr;
+  pfa_pgid_t pgid;
+  uintptr_t rpn;
+  pte_t lpte;
+  unsigned long flags;
+  pte_t *pte;
+ 
+  /* Early (unsafe) check, we repeat the check with the lock held below */
+  if(!pfa_em_checkQ()) {
     return -1;
   }
+
+  /* If anything at all goes wrong, just bail out and let the normal handler
+   * deal with it. A remote PTE would succeed. */
+  pte = pfa_walk(mm, addr);
+  if(!pte || pte_none(*pte)) {
+    return -2;
+  }
   
-  // Bring in the new page
-  // We access the queue directly because we hold the pfa_em_mut
-  PQ_POP(pfa_freeq, dst_paddr);
-  pgid = pfa_remote_to_pgid(vmf->orig_pte);
-  rpn = pfa_pgid_rpn(pgid);
-  PFA_ASSERT(dst_paddr != 0, "NULL destination!");
-  mb_send((uintptr_t)NULL, dst_paddr, MB_OC_PAGE_READ, rpn);
-  mb_wait();
-  
-  // Update metadata
-  // We use the queues directly because we hold pfa_em_mut
-  PQ_PUSH(pfa_new_id, pgid);
-  PQ_PUSH(pfa_new_vaddr, vmf->address);
+  if(pte_remote(*pte)) {
+    // Bring in the new page
+    // We access the queue directly because we hold the pfa_em_mut
+    spin_lock_irqsave(&pfa_em_mut, flags);
 
-  // Create new local PTE
-  lpte = pfa_remote_to_local(vmf->orig_pte, dst_paddr);
+    if(!pfa_em_checkQ()) {
+      spin_unlock_irqrestore(&pfa_em_mut, flags);
+      return -1;
+    }
 
-  pfa_trace("Placing rpn 0x%lx into paddr 0x%lx for vaddr 0x%lx (oldPTE=0x%lx, newPTE=0x%lx)\n",
-      rpn,
-      dst_paddr,
-      vmf->address,
-      vmf->orig_pte.pte,
-      lpte.pte);
+    PQ_POP(pfa_freeq, dst_paddr);
+    pgid = pfa_remote_to_pgid(*pte);
+    rpn = pfa_pgid_rpn(pgid);
+    PFA_ASSERT(dst_paddr != 0, "NULL destination!");
+    mb_send((uintptr_t)NULL, dst_paddr, MB_OC_PAGE_READ, rpn);
+    mb_wait();
+    
+    // Update metadata
+    // We use the queues directly because we hold pfa_em_mut
+    PQ_PUSH(pfa_new_id, pgid);
+    PQ_PUSH(pfa_new_vaddr, addr);
 
-  set_pte_at(vmf->vma->vm_mm, vmf->address, vmf->pte, lpte);
-  vmf->orig_pte = lpte;
+    // Create new local PTE
+    lpte = pfa_remote_to_local(*pte, dst_paddr);
 
-  update_mmu_cache(vmf->vma, vmf->address, vmf->pte);
+    pfa_trace("Placing rpn 0x%lx into paddr 0x%lx for vaddr 0x%lx (oldPTE=0x%lx, newPTE=0x%lx)\n",
+        rpn,
+        dst_paddr,
+        addr,
+        pte->pte,
+        lpte.pte);
 
-  spin_unlock_irqrestore(&pfa_em_mut, flags);
-  return 0;
+    *pte = lpte;
+
+    local_flush_tlb_page(addr);
+    spin_unlock_irqrestore(&pfa_em_mut, flags);
+    return 0;
+  } else {
+    return -2;
+  }
 }
 #endif
 
@@ -947,10 +996,11 @@ static int kpfad(void *p)
       break;
 
     if(pfa_read_newstat() != 0) {
+      uint64_t start;
       down_read(&mm->mmap_sem);
       pfa_lock(global);
 
-      uint64_t start = pfa_stat_clock();
+      start = pfa_stat_clock();
       /* Note: the order matters here. If you fill the freeq before draining
        * the newq, the frameq could overflow */
       nfetched = pfa_drain_newq(0);
