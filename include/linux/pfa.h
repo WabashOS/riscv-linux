@@ -137,8 +137,13 @@ static inline void pfa_dump_trace(void) {
 extern struct task_struct *pfa_tsk[PFA_MAX_TASKS];
 
 /* Remote PTE */
+#ifdef riscv
 #define PFA_PGID_SHIFT  12
 #define PFA_PROT_SHIFT  2
+#else //x86
+#define PFA_PGID_SHIFT  14
+#define PFA_PROT_SHIFT  2
+#endif
 
 /* pgid is the metadata we store in a PTE before making it remote.*/
 typedef uint64_t pfa_pgid_t;
@@ -323,16 +328,18 @@ static inline pte_t pfa_mk_remote_pte(swp_entry_t swp_ent, pgprot_t prot,
 static inline pte_t pfa_remote_to_local(pte_t rpte, uintptr_t paddr)
 {
   uint64_t lpte = pte_val(rpte);
+  uint64_t ppn;
+
   // Mask off the pgid
   lpte &= (1 << PFA_PGID_SHIFT) - 1;
+
   // Move the prot bits into the right place for a local pte
   lpte >>=  PFA_PROT_SHIFT;
+
   // Mask in the ppn
-  lpte |= (paddr & PAGE_MASK) >> 2;
+  ppn = (paddr & PAGE_MASK) >> PAGE_SHIFT;
+  lpte |= ppn << (PFA_PGID_SHIFT - 2);
   
-  // Clear pgid
-  // lpte &= ~(PAGE_MASK);
-  // lpte |= paddr & PAGE_MASK;
   return __pte(lpte);
 }
 

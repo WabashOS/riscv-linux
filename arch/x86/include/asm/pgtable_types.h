@@ -43,7 +43,7 @@
  * See linux/pfa.h for details of remote PTE format */
 #define _PAGE_REMOTE    (1 << 1)
 /* Page has been fetched by the PFA but not yet processed by bookkeeping */
-#define _PAGE_FETCHED   (1 << 9)
+#define _PAGE_FETCHED   (1 << _PAGE_BIT_SOFTW2)
 
 #define _PAGE_PRESENT	(_AT(pteval_t, 1) << _PAGE_BIT_PRESENT)
 #define _PAGE_RW	(_AT(pteval_t, 1) << _PAGE_BIT_RW)

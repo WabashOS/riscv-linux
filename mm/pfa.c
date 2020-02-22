@@ -219,9 +219,7 @@ void pfa_epg_apply(struct page *pg)
       pfa_epg_cnt--;
       PFA_ASSERT(pfa_epg_cnt >= 0, "Popping from empty list\n");
 
-      //XXX PFA
-      /* flush_tlb_page(vma, addr); */
-      flush_tlb_all();
+      flush_tlb_page(vma, addr);
       spin_unlock_irqrestore(&pfa_evict_mut, flags);
       return;
     }
@@ -797,7 +795,8 @@ int pfa_em(struct mm_struct *mm, uintptr_t addr)
   uintptr_t rpn;
   pte_t lpte;
   unsigned long flags;
-  pte_t *pte;
+  volatile pte_t *pte;
+  struct vm_area_struct fake_vma;
  
   /* Early (unsafe) check, we repeat the check with the lock held below */
   if(!pfa_em_checkQ()) {
@@ -844,8 +843,13 @@ int pfa_em(struct mm_struct *mm, uintptr_t addr)
         lpte.pte);
 
     *pte = lpte;
+    barrier();
 
-    flush_tlb_all();
+    /* Ok ok, this is naughty, I know. But it works on x86 and riscv and
+     * getting the VMA could be expensive or use blocking codepaths and
+     * flush_tlb_page only uses vma->vm_mm*/
+    fake_vma.vm_mm = mm;
+    flush_tlb_page(&fake_vma, addr);
     spin_unlock_irqrestore(&pfa_em_mut, flags);
     return 0;
   } else {
@@ -863,8 +867,6 @@ int pfa_handle_fault(struct vm_fault *vmf)
       pte_val(*(vmf->pte)));
   pfa_stat_add(n_pfa_fault, 1, current);
 
-  /* Note: we must already hold mm->mmap_sem or we could deadlock with kpfad */
-
   if(!is_pfa_tsk(current)) {
     pfa_trace("Page fault on remote page after PFA exited\n");
     return VM_FAULT_SIGBUS;
@@ -878,16 +880,10 @@ int pfa_handle_fault(struct vm_fault *vmf)
   pfa_fill_freeq();
   pfa_stat_add(n_fault_fetched, nfetched, current);
 
-#ifdef CONFIG_PFA_KPFAD
-  kpfad_dec_sleep();
-#endif
-
   /* Even if we didn't change the PTE, we must flush pte from the TLB
    * to trigger another PT walk (at least on Rocket) */
-	update_mmu_cache(vmf->vma, vmf->address, vmf->pte);
-  /* flush_tlb_all(); */
+  flush_tlb_page(vmf->vma, vmf->address);
 
-  /* pfa_unlock(global); */
   return 0;
 }
 

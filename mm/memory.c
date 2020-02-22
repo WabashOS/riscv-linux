@@ -4016,14 +4016,14 @@ static int handle_pte_fault(struct vm_fault *vmf)
   // the real PFA can't hold this sem, drop it before emulating
   /* up_read(&(vmf->vma->vm_mm->mmap_sem)); */
   /* if(vmf->pte && pte_remote(vmf->orig_pte)) { */
-  /*   if(pfa_em(vmf) == 0) { */
+  /*   if(pfa_em(vmf->vma->vm_mm, vmf->address) == 0) { */
   /*     #<{(| PFA could handle the fault, return immediately (real PFA would never */
   /*      * have triggered a page-fault). */
   /*      * Note that a return of 0 unconditionally retries the access without any */
   /*      * special accounting, we don't return VM_FAULT_RETRY in an attempt to */
   /*      * more closely match the real HW behavior. This exposes us to the chance */
   /*      * of infinite page faults. |)}># */
-  /*     down_read(&(vmf->vma->vm_mm->mmap_sem)); */
+  /*     #<{(| down_read(&(vmf->vma->vm_mm->mmap_sem)); |)}># */
   /*     return 0; */
   /*   } */
   /*   #<{(| else: The PFA needs servicing (the real PFA would have triggered a */
